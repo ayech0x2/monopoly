@@ -1,0 +1,8 @@
+{
+  "name": "aqarat-tunis",
+  "version": "1.0.0",
+  "private": true,
+  "description": "عقارات تونس — لعبة أونلاين",
+  "scripts": { "start": "node server/index.js" },
+  "dependencies": { "ws": "^8.18.0" }
+}

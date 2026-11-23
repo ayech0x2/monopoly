@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>عقارات تونس</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
+</head>
+<body>
+  <!-- شاشة الإعداد -->
+  <main id="setup">
+    <h1>عقارات تونس</h1>
+    <p class="sub">لعبة تداول العقارات في شوارع تونس</p>
+    <h3>عدد اللاعبين</h3>
+    <div id="count-picker" class="chips"></div>
+    <h3>الأسماء</h3>
+    <div id="name-inputs"></div>
+    <button class="btn big" data-act="start">ابدأ اللعب (نفس الجهاز)</button>
+
+    <h3>أو العب أونلاين مع أصدقائك</h3>
+    <div id="online">
+      <input id="onName" maxlength="14" placeholder="اسمك">
+      <button class="btn green" data-act="create">إنشاء غرفة</button>
+      <input id="onCode" maxlength="4" placeholder="رمز الغرفة" autocapitalize="characters">
+      <button class="btn ghost" data-act="join">انضمام</button>
+    </div>
+    <p id="neterr" class="neterr"></p>
+  </main>
+
+  <!-- ردهة الغرفة (أونلاين) -->
+  <main id="lobby" class="hidden">
+    <h1>غرفة <span id="roomCode" dir="ltr"></span></h1>
+    <p class="sub">شارك الرابط مع أصدقائك (من 2 إلى 6 لاعبين)</p>
+    <input id="roomLink" readonly data-act="copylink" dir="ltr">
+    <div id="lobby-players"></div>
+    <div class="lobby-acts">
+      <button class="btn big" data-act="startonline">ابدأ اللعب</button>
+      <button class="btn ghost" data-act="leave">خروج</button>
+    </div>
+    <p id="lobbyMsg" class="neterr"></p>
+  </main>
+
+  <!-- شاشة اللعبة: تملأ كامل النافذة -->
+  <div id="game" class="hidden">
+    <canvas id="gl"></canvas>
+
+    <!-- واجهة اللعب فوق المشهد ثلاثي الأبعاد (تظهر فقط في وضع 3D) -->
+    <div id="hud">
+      <section id="hudplayers"></section>
+      <section id="hudturn"></section>
+      <nav id="hudbar">
+        <button class="tb" data-act="togglelog" id="btnlog" title="السجل"><i>📜</i></button>
+        <button class="tb" id="hudcards" data-act="manage" title="أوراقي"><i>🏠</i></button>
+        <button class="tb on" id="btnfollow" data-act="followtoggle" title="الكاميرا تتبع اللاعب"><i>🎯</i></button>
+        <button class="tb" data-act="resetview" title="عرض اللوحة كاملة"><i>🎥</i></button>
+        <button class="tb" data-act="mute" id="btnmute" title="الصوت"><i>🔊</i></button>
+        <button class="tb" data-act="fullscreen" title="ملء الشاشة"><i>⛶</i></button>
+        <button class="tb danger" data-act="leavegame" title="انسحاب"><i>✖</i></button>
+      </nav>
+      <span id="hudnet"></span>
+      <aside id="hudside">
+                <div class="panel"><h4>السجل</h4><div id="hudlog"></div></div>
+      </aside>
+      <div id="hudhand"></div>
+      <div id="hudwrap"></div>
+      <div id="banner"></div>
+    </div>
+    <header id="topbar">
+      <div id="players"></div>
+      <div id="netstat"></div>
+    </header>
+    <section id="leftcol"><section id="mine"></section></section>
+    <div id="stage"><div id="board"></div></div>
+    <section id="rightcol">
+      <div id="log"></div>
+      <nav id="dock">
+        <button class="ibtn" data-act="fullscreen" title="ملء الشاشة">⛶</button>
+        <button class="btn red sm" data-act="leavegame">مغادرة اللعبة</button>
+      </nav>
+    </section>
+  </div>
+
+  <!-- النوافذ المنبثقة -->
+  <div id="modal" class="hidden" data-act="closeOverlay"></div>
+
+  <!-- اقتراح ملء الشاشة -->
+  <div id="fsprompt" class="hidden">
+    <div class="box card-modal">
+      <h2>العب بملء الشاشة</h2>
+      <p class="sub">لعبتك لا تزال جارية.</p>
+      <div class="acts">
+        <button class="btn big" data-act="fsyes">⛶ ادخل وضع ملء الشاشة</button>
+        <button class="btn ghost" data-act="fsno">لاحقًا</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="game.js"></script>
+  <script src="sfx.js"></script>
+  <script src="ui.js"></script>
+  <script src="net.js"></script>
+  <script type="module" src="scene3d.js"></script>
+</body>
+</html>
