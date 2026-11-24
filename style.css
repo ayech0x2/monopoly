@@ -1150,3 +1150,18 @@ button.tcard:hover { transform: translateY(-2px); }
 .swatch { width: 28px; height: 28px; border-radius: 50%; border: 0; cursor: pointer; box-shadow: 0 0 0 2px rgba(255,255,255,.55), 0 2px 4px rgba(0,0,0,.4); }
 .swatch.on { box-shadow: 0 0 0 3px #fff, 0 0 0 5px #f2b134; transform: scale(1.1); }
 .swatch:disabled { opacity: .25; cursor: not-allowed; }
+
+/* الحساب والملف الشخصي */
+#acctbar { display: flex; justify-content: flex-end; margin-bottom: 6px; }
+#acct { position: fixed; inset: 0; z-index: 90; display: flex; align-items: center; justify-content: center; padding: 14px; background: rgba(5, 14, 18, .68); backdrop-filter: blur(2px); }
+#acct.hidden { display: none; }
+.box.acct { width: min(460px, 100%); display: flex; flex-direction: column; gap: 8px; text-align: start; }
+.box.acct input { width: 100%; box-sizing: border-box; }
+.box.acct h3 { margin: 10px 0 2px; color: var(--gold1, #f6d27a); }
+.astats { display: flex; gap: 8px; margin: 6px 0; }
+.astats > div { flex: 1; text-align: center; padding: 8px; border-radius: 12px; background: rgba(0,0,0,.28); box-shadow: 0 0 0 1px rgba(246,210,122,.3); }
+.astats b { display: block; font-size: 1.5rem; color: var(--gold1, #f6d27a); } .astats small { opacity: .75; }
+.hist { max-height: 220px; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+.hrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: 10px; background: rgba(255,255,255,.06); }
+.hrow.won { background: rgba(242,177,52,.18); box-shadow: 0 0 0 1px rgba(242,177,52,.5); }
+.hrow .hres { font-weight: 800; white-space: nowrap; } .hrow .hpl small, .hrow .hdt small { opacity: .7; display: block; } .hrow .hdt { text-align: end; font-size: .85rem; }

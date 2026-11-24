@@ -8,6 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const { WebSocketServer } = require('ws');
+const accounts = require('./accounts');
 
 const ROOT = path.join(__dirname, '..');
 const PORT = +process.env.PORT || 3100;
@@ -16,14 +17,45 @@ const LOBBY_GRACE_MS = 60_000;          // مقعد منقطع في الردهة
 const ROOM_TTL_MS = 30 * 60_000;        // غرفة بلا متصلين تُحذف بعد 30 دقيقة
 
 /* ---------- ملفات ثابتة (قائمة بيضاء حتى لا يُكشف كود الخادم) ---------- */
-const FILES = ['index.html', 'style.css', 'data.js', 'game.js', 'ui.js', 'sfx.js', 'net.js', 'scene3d.js', 'vendor/three.module.js', 'vendor/three.core.js', 'vendor/OrbitControls.js', 'vendor/RoomEnvironment.js', 'vendor/RoundedBoxGeometry.js',
+const FILES = ['index.html', 'style.css', 'data.js', 'game.js', 'ui.js', 'sfx.js', 'net.js', 'account.js', 'scene3d.js', 'vendor/three.module.js', 'vendor/three.core.js', 'vendor/OrbitControls.js', 'vendor/RoomEnvironment.js', 'vendor/RoundedBoxGeometry.js',
   'vendor/loaders/GLTFLoader.js', 'vendor/utils/BufferGeometryUtils.js', 'vendor/utils/SkeletonUtils.js',
   ...['tree', 'tree-high', 'rocks-low', 'rocks-high', 'stones', 'plant', 'patch-grass', 'patch-dirt', 'tent', 'flag', 'target', 'fence', 'building-structure', 'building-roof'].map(f => `models/scene/${f}.glb`), 'models/scene/Textures/colormap.png',
   ...['Cow.glb', 'Cat.glb', 'Mouse.glb', 'Bear.glb', 'Rabbit.glb', 'Pig.glb', 'Wolf.glb', 'Monkey.glb', 'Cheetah.glb', 'Panda.glb', 'Lion.glb'].map(f => `models/${f}`)];
 const TYPES = { '.gltf': 'model/gltf+json', '.glb': 'model/gltf-binary', '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.png': 'image/png' };
 
+/* ---------- واجهة الحسابات (JSON عبر HTTP؛ الجلسة في ترويسة Authorization: Bearer) ---------- */
+const attempts = new Map();                         // IP → [عدد المحاولات، بداية النافذة]
+function throttled(ip) {
+  const now = Date.now(), a = attempts.get(ip);
+  if (!a || now - a[1] > 5 * 60_000) { attempts.set(ip, [1, now]); return false; }
+  return ++a[0] > 12;
+}
+setInterval(() => { const now = Date.now(); for (const [k, a] of attempts) if (now - a[1] > 5 * 60_000) attempts.delete(k); }, 5 * 60_000);
+function api(req, res, p) {
+  const json = (code, o) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(o)); };
+  const token = (req.headers.authorization || '').replace(/^Bearer /, '');
+  const ip = req.socket.remoteAddress || '';
+  if (req.method === 'GET' && p === '/api/me') { const u = accounts.me(token); return u ? json(200, { user: u }) : json(401, { err: 'غير مسجَّل' }); }
+  if (req.method !== 'POST') return json(405, { err: 'غير مسموح' });
+  let body = '';
+  req.on('data', c => { body += c; if (body.length > 4096) req.destroy(); });
+  req.on('end', () => {
+    let m; try { m = JSON.parse(body || '{}'); } catch { return json(400, { err: 'طلب غير صالح' }); }
+    if (!m || typeof m !== 'object') return json(400, { err: 'طلب غير صالح' });
+    if (p === '/api/register' || p === '/api/login') {
+      if (throttled(ip)) return json(429, { err: 'محاولات كثيرة، حاول بعد قليل' });
+      const r = p === '/api/register' ? accounts.register(m.username, m.password, m.display) : accounts.login(m.username, m.password);
+      return r.err ? json(400, { err: r.err }) : json(200, r);
+    }
+    if (p === '/api/logout') { accounts.logout(token); return json(200, {}); }
+    if (p === '/api/profile') { const u = accounts.updateProfile(token, m); return u ? json(200, { user: u }) : json(401, { err: 'غير مسجَّل' }); }
+    json(404, { err: 'غير موجود' });
+  });
+}
+
 const server = http.createServer((req, res) => {
   const p = new URL(req.url, 'http://x').pathname;
+  if (p.startsWith('/api/')) return api(req, res, p);
   const name = p === '/' ? 'index.html' : p.slice(1);
   if (!FILES.includes(name)) { res.writeHead(404); res.end('not found'); return; }
   fs.readFile(path.join(ROOT, name), (err, buf) => {
@@ -84,8 +116,25 @@ function broadcastLobby(room) {
     players: room.seats.map((s, j) => ({ name: s.name, char: s.char, icon: CHARS[s.char].icon, color: s.color, conn: !!s.ws })),
   }));
 }
+function recordResults(room, g) {
+  room.recorded = true;
+  try {
+    const G = JSON.parse(g);
+    const winner = G.winner ? G.winner.id : -1;
+    const names = G.players.map(p => ({ name: p.name, icon: p.icon }));
+    room.seats.forEach((seat, i) => {
+      if (!seat.uid) return;
+      const me = G.players[i];
+      accounts.recordGame(seat.uid, {
+        at: Date.now(), won: i === winner, winner: winner >= 0 ? G.players[winner].name : null, players: names,
+        bankrupt: !!me.bankrupt, cash: me.cash, props: G.owner.filter(o => o === i).length,
+      });
+    });
+  } catch (e) { console.error('record failed', e); }
+}
 function broadcastState(room) {
   const g = room.engine.snapshot();
+  if (!room.recorded && g.includes('"over":true')) recordResults(room, g);
   const conn = JSON.stringify(room.seats.map(s => !!s.ws));
   room.seats.forEach((seat, i) => send(seat.ws, `{"t":"state","you":${i},"conn":${conn},"g":${JSON.stringify(g)}}`));
 }
@@ -99,6 +148,7 @@ function attach(ws, room, idx) {
   if (seat.ws && seat.ws !== ws) { seat.ws.room = null; seat.ws.close(); }   // نفس اللاعب من تبويب آخر
   clearTimeout(seat.grace);
   seat.ws = ws; ws.room = room; ws.token = seat.token;
+  if (ws.uid) seat.uid = ws.uid;
   room.lastActive = Date.now();
   refresh(room);
 }
@@ -132,6 +182,7 @@ const handlers = {
   create(ws, m) {
     if (ws.room) return;
     if (!validToken(m.token)) return send(ws, { t: 'err', m: 'هوية غير صالحة' });
+    ws.uid = accounts.uidOf(m.auth);
     const room = { code: newCode(), seats: [], started: false, engine: null, lastActive: Date.now() };
     rooms.set(room.code, room);
     room.seats.push({ token: m.token, name: cleanName(m.name, 'لاعب 1'), char: freeChar(room), color: freeColor(room), ws: null });
@@ -140,6 +191,7 @@ const handlers = {
   join(ws, m) {
     if (ws.room) return;
     if (!validToken(m.token)) return send(ws, { t: 'err', m: 'هوية غير صالحة' });
+    ws.uid = accounts.uidOf(m.auth);
     const room = rooms.get(String(m.code || '').toUpperCase());
     if (!room) return send(ws, { t: 'err', code: 'no-room', m: 'الغرفة غير موجودة' });
     let idx = room.seats.findIndex(s => s.token === m.token);
