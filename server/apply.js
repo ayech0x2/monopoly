@@ -42,7 +42,7 @@ function applyAction(pid, m) {
   // عرض البيع متاح لأي لاعب في أي وقت (لا يلزم دوره)
   if (T === 'trade') {
     if (G.players[pid].bankrupt) return 'غير مسموح';
-    if (!a || typeof a !== 'object' || !isIdx(a.give) || !Number.isInteger(a.to) || !Number.isInteger(a.cash) || !(a.take === null || isIdx(a.take))) return 'عرض غير صالح';
+    if (!a || typeof a !== 'object' || !Array.isArray(a.give) || !Array.isArray(a.take) || a.give.length > 40 || a.take.length > 40 || !a.give.every(isIdx) || !a.take.every(isIdx) || !Number.isInteger(a.to) || !Number.isInteger(a.cash)) return 'عرض غير صالح';
     return proposeTrade(pid, a.to, a.give, a.take, a.cash);
   }
   if (T === 'unmortgage') {

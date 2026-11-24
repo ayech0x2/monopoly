@@ -564,9 +564,13 @@ function tradeErr(t) {
   const a = G.players[t.from], b = G.players[t.to];
   if (!a || !b || t.from === t.to || a.bankrupt || b.bankrupt) return 'لاعب غير صالح';
   if (!Number.isInteger(t.cash)) return 'مبلغ غير صالح';
-  const e = tradableErr(t.give, t.from) || (t.take !== null ? tradableErr(t.take, t.to) : null);
+  if (!Array.isArray(t.give) || !Array.isArray(t.take) || !t.give.length) return 'اختر عقارًا لتعطيه';
+  if (new Set(t.give).size !== t.give.length || new Set(t.take).size !== t.take.length) return 'عرض غير صالح';
+  let e = null;
+  for (const i of t.give) e = e || tradableErr(i, t.from);
+  for (const i of t.take) e = e || tradableErr(i, t.to);
   if (e) return e;
-  if (t.take === null && t.cash <= 0) return 'اطلب مالًا أو عقارًا في المقابل';
+  if (!t.take.length && t.cash <= 0) return 'اطلب مالًا أو عقارًا في المقابل';
   if (t.cash > 0 && b.cash < t.cash) return `${b.name} لا يملك هذا المبلغ`;
   if (t.cash < 0 && a.cash < -t.cash) return 'لا تملك هذا المبلغ';
   return null;
@@ -575,13 +579,13 @@ function tradeErr(t) {
 let tradeTimer = null;
 function proposeTrade(from, to, give, take, cash) {
   if (G.trade || G.over || G.phase === 'auction') return 'لا يمكن العرض الآن';   // البيع متاح للجميع في أي وقت
-  const t = { from, to, give, take: take === undefined ? null : take, cash: cash || 0 };
+  const t = { from, to, give: [].concat(give), take: take == null ? [] : [].concat(take), cash: cash || 0 };
   const e = tradeErr(t);
   if (e) return e;
   G.trade = t;
   clearTimeout(tradeTimer);
   tradeTimer = setTimeout(() => { if (G.trade === t) { G.trade = null; log('⌛ انتهت مهلة العرض.'); R(); } }, 45000);   // لا يعطّل اللعبة إن لم يردّ أحد
-  log(`${G.players[from].name} يعرض ${SPACES[give].name} على ${G.players[to].name}.`);
+  log(`${G.players[from].name} يعرض ${t.give.map(i => SPACES[i].name).join(' + ')} على ${G.players[to].name}.`);
   R();
   return null;
 }
@@ -591,11 +595,11 @@ function answerTrade(ok) {
   G.trade = null; clearTimeout(tradeTimer);
   const a = G.players[t.from], b = G.players[t.to];
   if (ok && !tradeErr(t)) {
-    G.owner[t.give] = t.to;
-    if (t.take !== null) G.owner[t.take] = t.from;
+    t.give.forEach(i => { G.owner[i] = t.to; });
+    t.take.forEach(i => { G.owner[i] = t.from; });
     a.cash += t.cash; b.cash -= t.cash;
-    const money = t.cash > 0 ? `${t.cash} ${CUR}` : '', prop = t.take !== null ? SPACES[t.take].name : '';
-    log(`${b.name} أخذ ${SPACES[t.give].name} من ${a.name} مقابل ${[prop, money].filter(Boolean).join(' و ')}${t.cash < 0 ? ` (و${a.name} أضاف ${-t.cash} ${CUR})` : ''}.`);
+    const money = t.cash > 0 ? `${t.cash} ${CUR}` : '', prop = t.take.map(i => SPACES[i].name).join(' + ');
+    log(`${b.name} أخذ ${t.give.map(i => SPACES[i].name).join(' + ')} من ${a.name} مقابل ${[prop, money].filter(Boolean).join(' و ')}${t.cash < 0 ? ` (و${a.name} أضاف ${-t.cash} ${CUR})` : ''}.`);
   } else {
     log(`${b.name} رفض عرض ${a.name}.`);
   }

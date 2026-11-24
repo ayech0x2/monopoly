@@ -362,14 +362,14 @@ function tradeCalc() {
   const ask = Math.max(0, Math.floor(+d.ask || 0)), add = Math.max(0, Math.floor(+d.add || 0));
   const t = { from: me.id, to: d.to, give: d.give, take: d.take, cash: ask - add };
   const err = d.to === null ? 'اختر اللاعب' : tradeErr(t);
-  return { ask, add, t, err, giveV: tValue(d.give) + add, getV: (d.take !== null ? tValue(d.take) : 0) + ask };
+  return { ask, add, t, err, giveV: d.give.reduce((n, i) => n + tValue(i), 0) + add, getV: d.take.reduce((n, i) => n + tValue(i), 0) + ask };
 }
 // يحدّث الملخّص وزر الإرسال دون إعادة رسم النافذة (حتى لا يضيع التركيز أثناء الكتابة)
 function tradePatch() {
   if (!UI.trade || !$('#tradeSum')) return;
   const c = tradeCalc(), d = UI.trade;
-  const giveTxt = [propName(d.give), c.add ? `${c.add} ${CUR}` : ''].filter(Boolean).join(' + ');
-  const getTxt = [d.take !== null ? propName(d.take) : '', c.ask ? `${c.ask} ${CUR}` : ''].filter(Boolean).join(' + ') || '—';
+  const giveTxt = [...d.give.map(propName), c.add ? `${c.add} ${CUR}` : ''].filter(Boolean).join(' + ');
+  const getTxt = [...d.take.map(propName), c.ask ? `${c.ask} ${CUR}` : ''].filter(Boolean).join(' + ') || '—';
   $('#tradeSum').innerHTML = `تعطي <b>${giveTxt}</b> وتحصل على <b>${getTxt}</b>`;
   $('#tvGive').textContent = `${c.giveV} ${CUR}`; $('#tvGet').textContent = `${c.getV} ${CUR}`;
   const fair = $('#tradeFair');
@@ -386,20 +386,21 @@ function tradeHTML() {
   if (d.to === null || !others.some(p => p.id === d.to)) d.to = others.length ? others[0].id : null;
   const to = d.to === null ? null : G.players[d.to];
   const theirs = to ? SPACES.map((s, i) => i).filter(i => G.owner[i] === to.id && !tradableErr(i, to.id)) : [];
-  if (!theirs.includes(d.take)) d.take = null;
+  d.take = d.take.filter(i => theirs.includes(i));
+  const mine = SPACES.map((s, i) => i).filter(i => G.owner[i] === me.id && !tradableErr(i, me.id));
   const picker = others.map(p => `<button type="button" class="pbtn${p.id === d.to ? ' on' : ''}" style="--pc:${p.color}" data-act="tradeto" data-arg="${p.id}">
       <span class="pav">${p.icon}</span><b>${esc(p.name)}</b><small>${p.cash} ${CUR}</small></button>`).join('') || '<p>لا يوجد لاعبون آخرون</p>';
   return `<div class="box trade">${ribbon('بيع / تبادل')}
     <div class="tstep">١ · مع من تتبادل؟</div><div class="tpicker">${picker}</div>
     <div class="tcols">
       <section class="tcol give"><h4>⬆ تعطي</h4>
-        ${tcard(d.give)}
+        <div class="tgrid">${mine.map(i => tcard(i, { act: 'tradegive', on: d.give.includes(i) })).join('')}</div>
         ${tmoney('tradeAdd', 'أضف مالًا من عندك (اختياري)', d.add, me.cash)}
         <div class="tval">القيمة: <b id="tvGive"></b></div></section>
       <section class="tcol get"><h4>⬇ تحصل على${to ? ' من ' + esc(to.name) : ''}</h4>
         ${tmoney('tradeAsk', 'مال يدفعه لك', d.ask, to ? to.cash : 0)}
         <div class="tlabel">عقار من عقاراته (اختياري):</div>
-        <div class="tgrid">${theirs.length ? theirs.map(i => tcard(i, { act: 'tradetake', on: i === d.take })).join('') : '<p class="tnone">لا عقارات قابلة للتبادل</p>'}</div>
+        <div class="tgrid">${theirs.length ? theirs.map(i => tcard(i, { act: 'tradetake', on: d.take.includes(i) })).join('') : '<p class="tnone">لا عقارات قابلة للتبادل</p>'}</div>
         <div class="tval">القيمة: <b id="tvGet"></b></div></section>
     </div>
     <div id="tradeSum" class="tsum"></div><div id="tradeFair" class="tfair"></div>
@@ -410,8 +411,8 @@ function tradeHTML() {
 function tradeOfferHTML() {
   const t = G.trade, a = G.players[t.from], b = G.players[t.to];
   const local = UI.viewer === null, mineToAnswer = local || UI.viewer === t.to, mineToCancel = !local && UI.viewer === t.from;
-  const aGives = tcard(t.give) + (t.cash < 0 ? tcash(-t.cash) : '');
-  const bGives = (t.take !== null ? tcard(t.take) : '') + (t.cash > 0 ? tcash(t.cash) : '') || '<p class="tnone">لا شيء</p>';
+  const aGives = t.give.map(i => tcard(i)).join('') + (t.cash < 0 ? tcash(-t.cash) : '');
+  const bGives = t.take.map(i => tcard(i)).join('') + (t.cash > 0 ? tcash(t.cash) : '') || '<p class="tnone">لا شيء</p>';
   return `<div class="box trade offer">${ribbon('عرض بيع / تبادل')}
     <div class="toffer-h">${tplayer(a)}<span class="tarrow">⇄</span>${tplayer(b)}</div>
     <div class="tcols">
@@ -850,10 +851,11 @@ const ACTIONS = {
   },
   pass() { dispatch('pass'); },
   manage() { UI.manage = true; render(); },
-  tradeopen(i) { UI.trade = { give: +i, to: null, take: null, ask: '', add: '', err: '' }; UI.manage = false; UI.deed = null; render(); },
+  tradeopen(i) { UI.trade = { give: [+i], to: null, take: [], ask: '', add: '', err: '' }; UI.manage = false; UI.deed = null; render(); },
   tradeclose() { UI.trade = null; render(); },
-  tradeto(pid) { if (UI.trade) { UI.trade.to = +pid; UI.trade.take = null; UI.trade.err = ''; render(); } },
-  tradetake(i) { if (UI.trade) { UI.trade.take = UI.trade.take === +i ? null : +i; UI.trade.err = ''; render(); } },
+  tradeto(pid) { if (UI.trade) { UI.trade.to = +pid; UI.trade.take = []; UI.trade.err = ''; render(); } },
+  tradetake(i) { const d = UI.trade; if (d) { d.take = d.take.includes(+i) ? d.take.filter(k => k !== +i) : [...d.take, +i]; d.err = ''; render(); } },
+  tradegive(i) { const d = UI.trade; if (d) { d.give = d.give.includes(+i) ? (d.give.length > 1 ? d.give.filter(k => k !== +i) : d.give) : [...d.give, +i]; d.err = ''; render(); } },
   tradesend() {
     const d = UI.trade; if (!d || d.to === null) return;
     const c = tradeCalc();
