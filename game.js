@@ -30,9 +30,8 @@ function newGame(configs) {
     })),
     cur: 0, phase: 'roll', dice: [1, 1], rolling: false, extra: false, doubles: 0,
     owner: Array(40).fill(null), houses: Array(40).fill(0), mortgaged: Array(40).fill(false),
-    houseBank: 32, hotelBank: 12,
     decks: { chance: shuffle(CHANCE.map((_, i) => i)), chest: shuffle(CHEST.map((_, i) => i)) },
-    log: [], debt: null, auction: null, card: null, special: null, trade: null,
+    pot: 0, log: [], debt: null, auction: null, card: null, special: null, trade: null,
     over: false, winner: null, deadline: 0, turnMs: 60000, acted: false, grace: false,
   });
   log(`بدأت اللعبة! الدور الأول: ${cp().name}`);
@@ -75,16 +74,17 @@ function totalWorth(p) {
 
 /* ---------- الدفع والديون ---------- */
 // يدفع p مبلغًا إلى creditor (null = البنك). إن لم يكفِ رصيده تبدأ حالة «دين».
-function pay(p, amount, creditor, cont) {
+function pay(p, amount, creditor, cont, toPot) {
   if (amount <= 0) { cont && cont(); return; }
   if (p.cash >= amount) {
     p.cash -= amount;
+    if (toPot) G.pot += amount;
     if (creditor !== null && creditor !== undefined) G.players[creditor].cash += amount;
     cont && cont();
     R();
     return;
   }
-  G.debt = { pid: p.id, amount, creditor: creditor === undefined ? null : creditor, cont };
+  G.debt = { pid: p.id, amount, creditor: creditor === undefined ? null : creditor, cont, toPot: !!toPot };
   G.phase = 'debt';
   log(`${p.name} لا يملك ${amount} ${CUR}! عليه رهن عقاراته أو بيع مبانيه أو إعلان الإفلاس.`);
   if (typeof UI !== 'undefined') UI.manage = true;
@@ -103,6 +103,7 @@ function settleDebt() {
   const p = G.players[d.pid];
   if (p.cash < d.amount) return;
   p.cash -= d.amount;
+  if (d.toPot) G.pot += d.amount;
   if (d.creditor !== null) G.players[d.creditor].cash += d.amount;
   G.debt = null;
   G.phase = 'resolving';
@@ -121,7 +122,6 @@ function declareBankruptcy() {
     if (G.owner[i] !== p.id || !(G.houses[i] > 0)) return;
     const n = G.houses[i];
     cash += Math.floor((n * houseCost(i)) / 2);
-    if (n === 5) G.hotelBank++; else G.houseBank += n;
     G.houses[i] = 0;
   });
   p.cash = 0;
@@ -164,7 +164,7 @@ function forfeitPlayer(pid) {
   SPACES.forEach((s, i) => {
     if (G.owner[i] !== pid) return;
     const n = G.houses[i];
-    if (n > 0) { if (n === 5) G.hotelBank++; else G.houseBank += n; G.houses[i] = 0; }
+    if (n > 0) G.houses[i] = 0;
     G.owner[i] = null; G.mortgaged[i] = false;
   });
   p.jailCards.forEach(k => G.decks[k].push(CARDS_OF(k).findIndex(c => c.t === 'jailfree')));
@@ -408,9 +408,13 @@ function land(p) {
     case 'tax':
       if (s.income) { G.phase = 'tax'; R(); return; }
       log(`${p.name} يدفع ${s.amount} ${CUR} (${s.name}).`);
-      pay(p, s.amount, null, afterAction);
+      pay(p, s.amount, null, afterAction, true);
       return;
     case 'chance': case 'chest': drawCard(s.type); return;
+    case 'parking':
+      if (G.pot > 0) { log(`☕ ${p.name} وقف على «استراحة مجانية» وجمع ${G.pot} ${CUR} من الضرائب!`); p.cash += G.pot; G.pot = 0; }
+      else log(`${p.name} في «استراحة مجانية» — لا ضرائب مجمَّعة بعد.`);
+      afterAction(); return;
     case 'gojail': sendToJail(p); afterAction(); return;
     default: afterAction();
   }
@@ -437,7 +441,7 @@ function payTax(choice) {
   const amt = 200;
   G.phase = 'resolving';
   log(`${p.name} يدفع ضريبة الدخل: ${amt} ${CUR}.`);
-  pay(p, amt, null, afterAction);
+  pay(p, amt, null, afterAction, true);
 }
 
 /* ---------- البطاقات ---------- */
@@ -568,20 +572,23 @@ function tradeErr(t) {
   return null;
 }
 // يرجع null عند النجاح أو نص الخطأ
-function proposeTrade(to, give, take, cash) {
-  if (G.trade || G.over || !manageAllowed()) return 'لا يمكن العرض الآن';
-  const t = { from: G.cur, to, give, take: take === undefined ? null : take, cash: cash || 0 };
+let tradeTimer = null;
+function proposeTrade(from, to, give, take, cash) {
+  if (G.trade || G.over || G.phase === 'auction') return 'لا يمكن العرض الآن';   // البيع متاح للجميع في أي وقت
+  const t = { from, to, give, take: take === undefined ? null : take, cash: cash || 0 };
   const e = tradeErr(t);
   if (e) return e;
   G.trade = t;
-  log(`${cp().name} يعرض ${SPACES[give].name} على ${G.players[to].name}.`);
+  clearTimeout(tradeTimer);
+  tradeTimer = setTimeout(() => { if (G.trade === t) { G.trade = null; log('⌛ انتهت مهلة العرض.'); R(); } }, 45000);   // لا يعطّل اللعبة إن لم يردّ أحد
+  log(`${G.players[from].name} يعرض ${SPACES[give].name} على ${G.players[to].name}.`);
   R();
   return null;
 }
 function answerTrade(ok) {
   const t = G.trade;
   if (!t) return;
-  G.trade = null;
+  G.trade = null; clearTimeout(tradeTimer);
   const a = G.players[t.from], b = G.players[t.to];
   if (ok && !tradeErr(t)) {
     G.owner[t.give] = t.to;
@@ -596,8 +603,9 @@ function answerTrade(ok) {
 }
 function cancelTrade() {
   if (!G.trade) return;
+  const f = G.players[G.trade.from];
   G.trade = null;
-  log(`${cp().name} سحب عرضه.`);
+  log(`${f.name} سحب عرضه.`);
   R();
 }
 
@@ -615,15 +623,12 @@ function canBuild(i, pid) {
   if (h >= 5) return 'فيه فندق';
   if (h > Math.min(...gi.map(j => G.houses[j]))) return 'ابنِ بالتساوي';
   if (G.players[pid].cash < houseCost(i)) return 'الرصيد غير كافٍ';
-  if (h < 4 && G.houseBank < 1) return 'لا بيوت متوفرة';
-  if (h === 4 && G.hotelBank < 1) return 'لا فنادق متوفرة';
   return null;
 }
 function build(i) {
   if (!manageAllowed() || canBuild(i, G.cur)) return;
   const p = cp();
   p.cash -= houseCost(i);
-  if (G.houses[i] === 4) { G.houseBank += 4; G.hotelBank--; } else G.houseBank--;
   G.houses[i]++;
   log(`${p.name} بنى ${G.houses[i] === 5 ? 'فندقًا' : 'بيتًا'} في ${SPACES[i].name}.`);
   R();
@@ -634,14 +639,12 @@ function canSellHouse(i, pid) {
   if (s.type !== 'prop' || G.owner[i] !== pid || !(G.houses[i] > 0)) return 'لا مبانٍ';
   const gi = groupIdx(s.group);
   if (G.houses[i] < Math.max(...gi.map(j => G.houses[j]))) return 'بِع بالتساوي';
-  if (G.houses[i] === 5 && G.houseBank < 4) return 'لا بيوت كافية في البنك';
   return null;
 }
 function sellHouse(i) {
   if (!manageAllowed() || canSellHouse(i, G.cur)) return;
   const p = cp();
   p.cash += Math.floor(houseCost(i) / 2);
-  if (G.houses[i] === 5) { G.hotelBank++; G.houseBank -= 4; } else G.houseBank++;
   G.houses[i]--;
   log(`${p.name} باع مبنى في ${SPACES[i].name}.`);
   R();
@@ -666,9 +669,9 @@ function canUnmortgage(i, pid) {
   if (G.players[pid].cash < unmortgageCost(i)) return 'الرصيد غير كافٍ';
   return null;
 }
-function unmortgage(i) {
-  if (!manageAllowed() || canUnmortgage(i, G.cur)) return;
-  const p = cp();
+function unmortgage(pid, i) {   // متاح لأي لاعب في أي وقت
+  if (G.over || !G.players[pid] || G.players[pid].bankrupt || canUnmortgage(i, pid)) return;
+  const p = G.players[pid];
   p.cash -= unmortgageCost(i); G.mortgaged[i] = false;
   log(`${p.name} فكّ رهن ${SPACES[i].name}.`);
   R();

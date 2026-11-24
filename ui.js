@@ -18,6 +18,7 @@ const UI = { conn: null, viewer: null, fling: null, manage: false, deed: null, p
    محليًا: المشاهد هو صاحب الدور دائمًا. أونلاين: UI.viewer = مقعدي. */
 const isMyTurn = () => !!G.players && viewerId() === G.cur;
 const uiManage = () => manageAllowed() && isMyTurn();
+const canTradeUI = () => !G.over && G.phase !== 'auction' && !G.trade && !G.players[viewerId()].bankrupt;
 
 /* ---------- إرسال الأفعال: محرك محلي أو خادم ---------- */
 const LOCAL = {
@@ -27,8 +28,8 @@ const LOCAL = {
   taxflat: () => payTax('flat'), taxpct: () => payTax('pct'), cardok: () => applyCard(),
   settle: () => settleDebt(), bankrupt: () => declareBankruptcy(),
   bid: n => auctionBid(n), pass: () => auctionPass(),
-  build: i => build(i), sellhouse: i => sellHouse(i), mortgage: i => mortgage(i), unmortgage: i => unmortgage(i),
-  trade: a => proposeTrade(a.to, a.give, a.take, a.cash), tradeyes: () => answerTrade(true), tradeno: () => answerTrade(false), tradecancel: () => cancelTrade(),
+  build: i => build(i), sellhouse: i => sellHouse(i), mortgage: i => mortgage(i), unmortgage: i => unmortgage(viewerId(), i),
+  trade: a => proposeTrade(viewerId(), a.to, a.give, a.take, a.cash), tradeyes: () => answerTrade(true), tradeno: () => answerTrade(false), tradecancel: () => cancelTrade(),
 };
 function dispatch(t, a) {
   if (NET.on) NET.send({ t: 'act', m: { t, a } });
@@ -78,6 +79,7 @@ function buildBoard() {
     if (s.price) h += `<div class="pr">${s.price} ${CUR}</div>`;
     else if (s.type === 'tax' && s.amount) h += `<div class="pr">${s.amount} ${CUR}</div>`;
     else if (s.type === 'go') h += `<div class="pr">اقبض ${GO_SALARY} ${CUR}</div>`;
+    if (s.type === 'parking') h += `<div class="pr pot2"></div>`;
     h += `<div class="own"></div><div class="toks"></div>`;
     el.innerHTML = h;
     b.appendChild(el);
@@ -103,6 +105,7 @@ function renderBoard() {
     const o = G.owner[i];
     el.querySelector('.own').style.background = o === null ? 'transparent' : G.players[o].color;
     el.classList.toggle('mort', !!G.mortgaged[i]);
+    const pp = el.querySelector('.pot2'); if (pp) pp.textContent = `${G.pot || 0} ${CUR}`;
     if (s.type === 'prop') {
       const n = G.houses[i];
       el.querySelector('.band').innerHTML = n === 5 ? '<i class="H"></i>' : '<i class="h"></i>'.repeat(n);
@@ -245,6 +248,7 @@ function renderCenter() {
     <div class="title">عقارات تونس</div>
     <div class="turn" style="color:${p.color}">${p.icon} ${esc(p.name)} — ${p.cash} ${CUR}</div>
     <div class="tray"><div id="dice" class="${G.rolling ? 'rolling' : ''}${canThrow() ? ' throwable' : ''}"${G.rolling && UI.fling ? ` style="--dx:${UI.fling.dx}px;--dy:${UI.fling.dy}px;--rot:${UI.fling.rot}deg"` : ''}>${diceHTML(dice)}</div></div>
+    <div class="pot" title="تُجمع الضرائب هنا ويأخذها من يقف على «استراحة مجانية»">☕ جائزة الاستراحة <b>${G.pot || 0} ${CUR}</b></div>
     <div class="total">المجموع <b>${dice[0] + dice[1]}</b></div>
     <div class="info">${info}</div>
     <div class="btns">${btns}</div>`;
@@ -325,13 +329,14 @@ function deedHTML(i) {
   if (s.price) foot.push(['قيمة الرهن', s.price / 2 + ' ' + CUR]);
   const status = o === null ? '<span class="dbadge free">غير مملوك</span>'
     : `<span class="dbadge own"><i style="background:${G.players[o].color}"></i>${esc(G.players[o].name)}${mort ? ' · مرهون' : ''}</span>`;
-  const sell = o !== null && o === viewerId() && uiManage() && !G.trade && !tradableErr(i, o) ? btn('بيع / تبادل', 'tradeopen', i, 'green') : '';
+  const sell = o !== null && o === viewerId() && canTradeUI() && !tradableErr(i, o) ? btn('بيع / تبادل', 'tradeopen', i, 'green') : '';
+  const unm = mort && o === viewerId() && !G.over && !canUnmortgage(i, o) ? btn(`فكّ الرهن −${unmortgageCost(i)}`, 'unmortgage', i, 'green') : '';
   return `<div class="box deed">${ribbon('صك الملكية')}
     <div class="dhead" style="--dc:${col}"><span class="dic">${icon}</span><div><small>${kind}</small><b>${esc(s.name)}</b></div></div>
     ${s.price ? `<div class="dmeta"><span class="dprice">${s.price} ${CUR}</span>${status}</div>` : ''}
     <div class="drows">${rows}</div>
     ${foot.length ? `<div class="dfoot">${foot.map(([a, b]) => `<div><small>${a}</small><b>${b}</b></div>`).join('')}</div>` : ''}
-    <div class="acts">${sell}<button class="btn" data-act="closeDeed">إغلاق</button></div></div>`;
+    <div class="acts">${unm}${sell}<button class="btn" data-act="closeDeed">إغلاق</button></div></div>`;
 }
 
 /* ---------- البيع والتبادل ---------- */
@@ -353,7 +358,7 @@ function tmoney(id, label, val, max) {
     <div class="tq">${[50, 100, 200].map(n => `<button type="button" class="qchip" data-act="tradeq" data-arg="${id}:${n}">+${n}</button>`).join('')}<button type="button" class="qchip" data-act="tradeq" data-arg="${id}:0">صفر</button></div></div>`;
 }
 function tradeCalc() {
-  const d = UI.trade, me = cp();
+  const d = UI.trade, me = G.players[viewerId()];
   const ask = Math.max(0, Math.floor(+d.ask || 0)), add = Math.max(0, Math.floor(+d.add || 0));
   const t = { from: me.id, to: d.to, give: d.give, take: d.take, cash: ask - add };
   const err = d.to === null ? 'اختر اللاعب' : tradeErr(t);
@@ -376,7 +381,7 @@ function tradePatch() {
 const propName = i => esc(SPACES[i].name);
 
 function tradeHTML() {
-  const d = UI.trade, me = cp();
+  const d = UI.trade, me = G.players[viewerId()];
   const others = G.players.filter(p => !p.bankrupt && p.id !== me.id);
   if (d.to === null || !others.some(p => p.id === d.to)) d.to = others.length ? others[0].id : null;
   const to = d.to === null ? null : G.players[d.to];
@@ -495,7 +500,7 @@ function renderModal() {
   } else if (G.trade) {
     UI.trade = null;
     h = tradeOfferHTML();
-  } else if (UI.trade && uiManage()) {
+  } else if (UI.trade && canTradeUI()) {
     h = tradeHTML();
   } else if (G.phase === 'card' && G.card && !UI.hud) {
     const k = G.card.kind;

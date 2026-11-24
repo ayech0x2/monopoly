@@ -1136,3 +1136,7 @@ button.tcard:hover { transform: translateY(-2px); }
 .deed .dfoot small { display: block; opacity: .75; font-size: .75rem; }
 .deed .dfoot b { color: var(--gold1, #f2b134); }
 .deed .acts { margin-top: 14px; }
+
+/* جائزة الاستراحة المجانية */
+#center .pot { margin: 4px auto; padding: 3px 14px; width: fit-content; border-radius: 99px; font-size: .9rem; background: rgba(0,0,0,.28); box-shadow: 0 0 0 1.5px rgba(246,210,122,.55); color: #f6d27a; }
+#center .pot b { color: #fff; margin-inline-start: 4px; }
