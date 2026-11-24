@@ -22,6 +22,7 @@ const HOME_ELEV = (47 * Math.PI) / 180;
 const FOV = 32;
 const T = 0.16;                       // سُمك اللوحة
 const FRAME = 12.4;
+const VIEW_W = 13.5;                   // العرض الذي تؤطّره الكاميرا: اللوحة مع إطارها الخشبي
 const D_SIZE = 0.56;                  // حجم النرد
 
 const INK = '#14221b';
@@ -38,7 +39,7 @@ const gw = c => unit(c) - 6;
 
 let renderer, scene, camera, controls, canvas, raycaster;
 const tiles = [], pawns = [], dice = [];
-let centerTex = null, hover = -1, lastT = 0, started = false, userMoved = false;
+let centerTex = null, hover = -1, hoverTag = -1, lastT = 0, started = false, userMoved = false;
 let dstate = 'none', dT0 = 0, diceKey = '';
 
 const ready = () => G.players && G.players.length;
@@ -252,6 +253,21 @@ function poseTableCard(c) {
   _q1.copy(camera.quaternion).multiply(_qx).multiply(_qt);                                                   // وجهها نحو الكاميرا
   c.mesh.quaternion.slerpQuaternions(_q0, _q1, e);
   const sc = 1 + (c.S * visH / c.sz - 1) * e; c.mesh.scale.set(sc, 1, sc);
+  placeBuyBar(c, e);
+}
+/* أزرار البطاقة (#buybar) تُثبَّت تحت منتصف حافتها السفلية وتظهر عند وصول البطاقة */
+const _b0 = new THREE.Vector3(), _b1 = new THREE.Vector3();
+function placeBuyBar(c, e) {
+  const el = document.getElementById('buybar'); if (!el) return;
+  const show = c.dir > 0 && e > 0.9 && el.innerHTML !== '';
+  el.classList.toggle('show', show);
+  if (!show) return;
+  c.mesh.updateMatrixWorld();
+  _b0.set(0, 0, c.sz / 2).applyMatrix4(c.mesh.matrixWorld).project(camera);    // منتصفا الحافتين القصيرتين: السفلى على الشاشة هي الأدنى
+  _b1.set(0, 0, -c.sz / 2).applyMatrix4(c.mesh.matrixWorld).project(camera);
+  const b = _b0.y < _b1.y ? _b0 : _b1;
+  el.style.left = `${((b.x + 1) / 2 * canvas.clientWidth).toFixed(1)}px`;
+  el.style.top = `${((1 - b.y) / 2 * canvas.clientHeight + 14).toFixed(1)}px`;
 }
 function tableCardStep(dt) {
   const w = wantedTableCard();
@@ -285,6 +301,8 @@ function buildStatic() {
   Object.assign(key.shadow.camera, { left: -19, right: 19, top: 19, bottom: -19, near: 1, far: 60 });
   key.shadow.bias = -0.0004; key.shadow.normalBias = 0.02; key.shadow.radius = 4;
   scene.add(key);
+  const fill = new THREE.DirectionalLight(0xd6e6ff, 0.38);      // ضوء تعبئة بارد من الجهة المقابلة: يليّن الظلال ويُبرز الحواف
+  fill.position.set(9, 8, -11); scene.add(fill);
 
   // لوحة: حافة سفلية + وسط
   const edgeMat = new THREE.MeshStandardMaterial({ color: BOARD_EDGE, roughness: 0.85 });
@@ -354,6 +372,12 @@ function tilesStep(ms, dt) {
     t.mesh.scale.y = (T + t.lift) / T;           // تمتد البلاطة للأسفل فتبقى ملتصقة باللوحة (لا تبدو طائرة)
     t.mesh.position.y = (T + t.lift) / 2;
     t.houses.position.y = T + t.lift;
+    if (t.cloth) t.cloth.rotation.y = Math.sin(ms / 380 + i * 1.7) * 0.32;          // الراية ترفرف
+    if (t.bornAt) {                                                                  // بروز المباني الجديدة
+      const u = Math.min(1, (performance.now() - t.bornAt) / 420), c1 = 1.70158, e = 1 + (c1 + 1) * Math.pow(u - 1, 3) + c1 * Math.pow(u - 1, 2);
+      t.bld.children.forEach(b => b.scale.setScalar(Math.max(0.01, e)));
+      if (u >= 1) t.bornAt = 0;
+    }
     if (i !== hover) t.topMat.emissive.setHex(i === dest ? (Math.round(0x6a * (0.6 + 0.4 * Math.sin(ms / 250))) << 16 | Math.round(0x4a * (0.6 + 0.4 * Math.sin(ms / 250))) << 8) : 0);
   });
 }
@@ -370,29 +394,75 @@ function prism(w, h, r, dp) {
   g.translate(0, 0, -dp / 2);
   return g;
 }
-const houseGeo = prism(0.27, 0.2, 0.13, 0.23), hotelGeo = prism(0.74, 0.2, 0.13, 0.28);
 const plastic = c => new THREE.MeshPhysicalMaterial({ color: c, roughness: 0.32, clearcoat: 0.7, clearcoatRoughness: 0.25 });
-const houseMat = plastic(0x1f9b3f), hotelMat = plastic(0xd62020);
+// بيت: جدران خضراء وسقف أغمق بارز ومدخنة وباب. فندق: مبنى أحمر من طابقين بسقف ونوافذ مضيئة وباب.
+const BLD = {
+  hWall: new THREE.BoxGeometry(0.21, 0.15, 0.19), hRoof: prism(0.27, 0.015, 0.12, 0.25), hChim: new THREE.BoxGeometry(0.04, 0.1, 0.04), hDoor: new THREE.BoxGeometry(0.05, 0.085, 0.012),
+  tWall: new THREE.BoxGeometry(0.7, 0.25, 0.25), tRoof: prism(0.77, 0.015, 0.13, 0.31), tWin: new THREE.BoxGeometry(0.06, 0.055, 0.012), tDoor: new THREE.BoxGeometry(0.09, 0.1, 0.012),
+  green: plastic(0x24a84f), greenDk: plastic(0x136b30), red: plastic(0xd93030), redDk: plastic(0x8c1717), cream: plastic(0xfff3d6),
+  glass: new THREE.MeshStandardMaterial({ color: 0xffe9a8, emissive: 0xffc94d, emissiveIntensity: 0.55, roughness: 0.4 }),
+};
+function makeBuilding(hotel) {
+  const g = new THREE.Group();
+  const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; g.add(m); };
+  if (!hotel) {
+    add(BLD.hWall, BLD.green, 0, 0.075, 0); add(BLD.hRoof, BLD.greenDk, 0, 0.15, 0);
+    add(BLD.hChim, BLD.greenDk, 0.065, 0.25, -0.03); add(BLD.hDoor, BLD.cream, 0, 0.0425, 0.096);
+  } else {
+    add(BLD.tWall, BLD.red, 0, 0.125, 0); add(BLD.tRoof, BLD.redDk, 0, 0.25, 0); add(BLD.tDoor, BLD.cream, 0, 0.05, 0.126);
+    for (const z of [0.126, -0.126]) for (let r = 0; r < 2; r++) for (let c = 0; c < 5; c++) {
+      if (z > 0 && r === 0 && c === 2) continue;                                   // مكان الباب
+      add(BLD.tWin, BLD.glass, (c - 2) * 0.125, 0.07 + r * 0.105, z);
+    }
+  }
+  return g;
+}
 function syncHouses(t, i) {
   const n = SPACES[i].type === 'prop' ? G.houses[i] : 0;
   if (n === t.hk) return;
-  t.hk = n; t.houses.clear();
+  if (!t.bld) { t.bld = new THREE.Group(); t.houses.add(t.bld); }
+  t.hk = n; t.bld.clear();
   const z = -0.57;                       // وسط الشريط اللوني (جهة المركز)
-  const add = (geo, mat, x) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, 0, z); m.castShadow = true; t.houses.add(m); };
-  if (n === 5) add(hotelGeo, hotelMat, 0);
-  else for (let k = 0; k < n; k++) add(houseGeo, houseMat, (k - (n - 1) / 2) * 0.27);
+  const place = (b, x) => { b.position.set(x, 0, z); b.scale.setScalar(0.01); t.bld.add(b); };
+  if (n === 5) place(makeBuilding(true), 0);
+  else for (let k = 0; k < n; k++) place(makeBuilding(false), (k - (n - 1) / 2) * 0.245);
+  t.bornAt = performance.now();          // المباني تبرز من الأرض بارتداد خفيف (tilesStep)
+}
+
+/* ---------- علم المالك: راية بلون اللاعب على حافة كل عقار مملوك (منكّسة إن كان مرهونًا) ---------- */
+const FLAG = {
+  pole: new THREE.CylinderGeometry(0.011, 0.011, 0.52, 8), knob: new THREE.SphereGeometry(0.024, 10, 8), foot: new THREE.CylinderGeometry(0.045, 0.06, 0.025, 14),
+  cloth: (() => { const s = new THREE.Shape(); s.moveTo(0, 0); s.lineTo(0.23, -0.065); s.lineTo(0, -0.13); s.closePath(); return new THREE.ExtrudeGeometry(s, { depth: 0.008, bevelEnabled: false }); })(),
+  white: new THREE.MeshStandardMaterial({ color: 0xf4f1e8, roughness: 0.5 }), gold: new THREE.MeshStandardMaterial({ color: 0xd9a93a, metalness: 0.9, roughness: 0.3 }), mats: {},
+};
+function syncFlag(t, i) {
+  if (t.flag) { t.houses.remove(t.flag); t.flag = t.cloth = null; }
+  const o = G.owner[i];
+  if (o === null || o === undefined) return;
+  const col = G.players[o].color;
+  const mat = FLAG.mats[col] || (FLAG.mats[col] = new THREE.MeshStandardMaterial({ color: col, roughness: 0.55, side: THREE.DoubleSide }));
+  const g = new THREE.Group();
+  const pole = new THREE.Mesh(FLAG.pole, FLAG.white); pole.position.y = 0.26; pole.castShadow = true;
+  const knob = new THREE.Mesh(FLAG.knob, FLAG.gold); knob.position.y = 0.53;
+  const foot = new THREE.Mesh(FLAG.foot, FLAG.white); foot.position.y = 0.0125;
+  const cloth = new THREE.Mesh(FLAG.cloth, mat); cloth.position.set(0, G.mortgaged[i] ? 0.3 : 0.5, -0.004); cloth.castShadow = true;
+  g.add(pole, knob, foot, cloth);
+  g.position.set(0.37, 0, 0.6);          // الركن الخارجي للبلاطة (بعيدًا عن المباني جهة المركز)
+  t.houses.add(g); t.flag = g; t.cloth = cloth;
 }
 
 /* ---------- البيادق ---------- */
 const PROFILE = [[0, 0], [.21, 0], [.23, .03], [.2, .07], [.12, .13], [.075, .22], [.085, .32], [.15, .38], [.16, .45], [.13, .52], [.06, .56], [0, .57]].map(([x, y]) => new THREE.Vector2(x, y));
 const pawnGeo = new THREE.LatheGeometry(PROFILE, 32);
-/* شخصيات متحرّكة بلون اللاعب: كلّها من نموذج Blender واحد (make_character.py) بتنويعات: قطّ، فأر، دبّ، أرنب، خنزير، ذئب */
-const MONSTERS = ['Cat.glb', 'Mouse.glb', 'Bear.glb', 'Rabbit.glb', 'Pig.glb', 'Wolf.glb'];
-const MONSTER_H = 0.6;          // ارتفاع الشخصية (وحدة = بلاطة)
+/* شخصيات متحرّكة بألوانها الطبيعية: كلّها من نموذج Blender واحد (make_character.py) بتنويعات: قطّ، فأر، دبّ، أرنب، خنزير، ذئب */
+const MONSTERS = CHARS.map(c => c.file);   // القائمة في data.js (Cow.glb يُبنى بـ tools/make_cow.js)
+const MONSTER_H = 0.6;          // ارتفاع جسم الشخصية حتى قمّة الرأس (وحدة = بلاطة)
+const BODY_H = 0.98;            // ارتفاع الجسم المشترك في النماذج (بلا آذان أو قرون) — فتتساوى كل الشخصيات في الطول
 const MODEL_YAW = 0;             // اتجاه نظر النموذج الافتراضي
 /* سرعة الأرض الطبيعية لمقطع الجري عند 1x (بوحدات النموذج/ث، قبل التحجيم) — تُقاس في make_character.py (RUN_SPEED).
    تُضبط سرعة تشغيل المقطع = السرعة الفعلية ÷ هذه، فتثبت القدم على الأرض ولا تنزلق. */
-const RUN_SPEED = { 'Cat.glb': 2.2822, 'Mouse.glb': 2.2592, 'Bear.glb': 2.3010, 'Rabbit.glb': 2.2595, 'Pig.glb': 2.3005, 'Wolf.glb': 2.2977 };
+const RUN_SPEED = { 'Cow.glb': 2.3005, 'Cat.glb': 2.2822, 'Mouse.glb': 2.2592, 'Bear.glb': 2.3010, 'Rabbit.glb': 2.2595, 'Pig.glb': 2.3005, 'Wolf.glb': 2.2977,
+  'Monkey.glb': 2.2592, 'Cheetah.glb': 2.2822, 'Panda.glb': 2.3010, 'Lion.glb': 2.2822 };   // الجديدة ترث سرعة النموذج الأصل
 const GAIT_SPEED = 1.3;          // سرعة أرض تقديرية (وحدة/ث) لمقطع Walk عند النماذج التي لا تملك Run
 const STOP_GRACE_MS = 120;       // لا نعود إلى Idle بين بلاطتين متتاليتين
 const gltfLoader = new GLTFLoader();
@@ -411,30 +481,60 @@ function makePawn(p, idx) {
   const ntex = new THREE.CanvasTexture(ncv); ntex.colorSpace = THREE.SRGBColorSpace;
   const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: ntex, transparent: true, depthTest: false, depthWrite: false }));
   tag.scale.set(1.05, 0.24, 1); tag.position.y = 1.0; tag.renderOrder = 10;
+  tag.material.opacity = 0; tag.visible = false;                    // تظهر فقط عند المرور على الشخصية (أو على بطاقة اللاعب)
+  const hit = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.21, 0.8, 10), new THREE.MeshBasicMaterial({ visible: false }));
+  hit.position.y = 0.4; hit.userData.pawn = idx;                    // هدف غير مرئي لالتقاط المؤشّر (أرخص من فحص النموذج المتحرّك)
   const halo = new THREE.Mesh(new THREE.RingGeometry(0.29, 0.38, 40),
-    new THREE.MeshBasicMaterial({ color: 0xffb300, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }));
+    new THREE.MeshBasicMaterial({ color: p.color, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }));   // الحلقة بلون اللاعب في الشريط العلوي
   halo.rotation.x = -Math.PI / 2; halo.position.y = 0.015;
-  grp.add(fallback, holder, tag, halo);
+  grp.add(fallback, holder, tag, halo, hit);
   scene.add(grp);
-  const pw = { grp, holder, halo, tag, fallback, pos: new THREE.Vector3(), target: new THREE.Vector3(), fresh: true,
+  const pw = { grp, holder, halo, tag, hit, fallback, pos: new THREE.Vector3(), target: new THREE.Vector3(), fresh: true,
     speed: 0, lastMove: 0, gait: 'Walk', natSpeed: GAIT_SPEED,
     yaw: 0, rank: 0, tagBase: 1.0, mixer: null, actions: {}, cur: null, once: 0, dead: false, hideAt: 0, prev: null };
-  const file = MONSTERS[idx % MONSTERS.length];
+  const file = MONSTERS[(p.char ?? idx) % MONSTERS.length];
   loadMonster(file).then(gl => attachModel(pw, gl, file))
     .catch(err => { console.warn('تعذّر تحميل الشخصية', err); fallback.visible = true; });
   return pw;
 }
 
+/* صاحب الدور: حدّ أصفر ساطع حول محيط الشخصية فقط. الشخصية تُعلِّم بكسلاتها في الـ stencil، ثم تُرسم نسخة
+   منتفخة قليلًا حيث لا علامة — فلا يظهر الأصفر داخل الجسم (حول الخطم أو العينين...) ولا يتغيّر لون الشخصية. */
+const OUTLINE_MAT = new THREE.MeshBasicMaterial({
+  color: 0xffc400, side: THREE.BackSide, toneMapped: false,
+  stencilWrite: true, stencilRef: 1, stencilFunc: THREE.NotEqualStencilFunc,
+  stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.KeepStencilOp,
+});
+OUTLINE_MAT.onBeforeCompile = sh => {
+  sh.vertexShader = sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n\ttransformed += normalize( normal ) * 0.032;');
+};
 function attachModel(pw, gl, file) {
-  const model = gl.scene;
-  model.traverse(o => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
+  const model = gl.scene, skinned = [];
+  pw.mats = []; pw.outline = [];
+  model.traverse(o => {
+    if (!o.isMesh) return;
+    o.castShadow = true; o.frustumCulled = false;
+    (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
+      if (!m || pw.mats.includes(m)) return;
+      Object.assign(m, { stencilRef: 1, stencilFunc: THREE.AlwaysStencilFunc, stencilZPass: THREE.ReplaceStencilOp });   // يُفعَّل بـ stencilWrite لصاحب الدور
+      pw.mats.push(m);
+    });
+    if (o.isSkinnedMesh) skinned.push(o);
+  });
+  skinned.forEach(o => {
+    const h = new THREE.SkinnedMesh(o.geometry, OUTLINE_MAT);
+    h.bind(o.skeleton, o.bindMatrix);
+    h.position.copy(o.position); h.quaternion.copy(o.quaternion); h.scale.copy(o.scale);
+    h.frustumCulled = false; h.visible = false; h.renderOrder = 5;          // بعد الشخصية نفسها
+    o.parent.add(h); pw.outline.push(h);
+  });
   const box = new THREE.Box3().setFromObject(model);
-  const k = MONSTER_H / Math.max(0.01, box.max.y - box.min.y);
+  const k = MONSTER_H / BODY_H;
   model.scale.setScalar(k);
   model.position.y = -box.min.y * k;                               // القدمان على اللوحة
   pw.holder.add(model);
   pw.model = model;
-  pw.tagBase = MONSTER_H + 0.3;
+  pw.tagBase = (box.max.y - box.min.y) * k + 0.3;                  // فوق الأذنين/القرنين
   pw.tag.position.y = pw.tagBase;
   pw.mixer = new THREE.AnimationMixer(model);
   gl.animations.forEach(c => { pw.actions[c.name] = pw.mixer.clipAction(c); });
@@ -459,11 +559,45 @@ function oneShot(pw, name, speed = 1) {
   pw.once = performance.now() + (a.getClip().duration / speed) * 1000;
 }
 
+/* ---------- السجن: قفص مكعّب من القضبان يسقط على حدود خانة السجن حين يُسجن لاعب، يحبسه لحظة ثم يتلاشى ---------- */
+const CAGE_H = 1.08, CAGE_PER_SIDE = 5, CAGE_INSET = 0.06, CAGE_DROP = 0.5, CAGE_HOLD = 2.4, CAGE_FADE = 0.7;
+const cageBarGeo = new THREE.CylinderGeometry(0.02, 0.02, CAGE_H, 8);
+function startCage(pw) {
+  const t = tiles[JAIL_POS], L = Math.min(t.w, t.d) - CAGE_INSET * 2, h = L / 2;
+  const mat = new THREE.MeshStandardMaterial({ color: 0x30343b, metalness: 0.65, roughness: 0.35, transparent: true });
+  const g = new THREE.Group();
+  const add = (geo, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; g.add(m); };
+  // قضبان عمودية على محيط المربّع
+  for (let side = 0; side < 4; side++) for (let k = 0; k < CAGE_PER_SIDE; k++) {
+    const u = -h + (k / CAGE_PER_SIDE) * L;
+    const [x, z] = side === 0 ? [u, -h] : side === 1 ? [h, u] : side === 2 ? [-u, h] : [-h, -u];
+    add(cageBarGeo, x, CAGE_H / 2, z);
+  }
+  // إطاران أفقيان (أسفل وأعلى) + عارضتان للسقف
+  const beamX = new THREE.BoxGeometry(L + 0.06, 0.05, 0.05), beamZ = new THREE.BoxGeometry(0.05, 0.05, L + 0.06);
+  for (const y of [0.03, CAGE_H]) { add(beamX, 0, y, -h); add(beamX, 0, y, h); add(beamZ, -h, y, 0); add(beamZ, h, y, 0); }
+  add(beamX, 0, CAGE_H, 0); add(beamZ, 0, CAGE_H, 0);
+  scene.add(g);
+  pw.cage = { g, mat, geos: [beamX, beamZ], t: 0, landed: false, cx: t.cx, cz: t.cz };
+}
+function stepCage(pw, dt) {
+  const c = pw.cage;
+  c.t += dt;
+  const u = Math.min(1, c.t / CAGE_DROP);
+  // سقوط بارتداد خفيف عند الاصطدام باللوحة
+  const up = u < 1 ? (1 - u * u) * 2.8 : Math.max(0, Math.sin((c.t - CAGE_DROP) * 16)) * 0.07 * Math.exp(-(c.t - CAGE_DROP) * 7);
+  c.g.position.set(c.cx, T + tileLiftAt(c.cx, c.cz) + up, c.cz);
+  if (u >= 1 && !c.landed) { c.landed = true; oneShot(pw, pw.actions.No ? 'No' : 'HitRecieve'); }
+  const f = (c.t - CAGE_DROP - CAGE_HOLD) / CAGE_FADE;
+  c.mat.opacity = f <= 0 ? Math.min(1, c.t / 0.15) : Math.max(0, 1 - f);
+  if (f >= 1) { scene.remove(c.g); c.mat.dispose(); c.geos.forEach(x => x.dispose()); pw.cage = null; }
+}
+
 function updatePawn(pw, id, ms, dt) {
   const p = G.players[id];
   // حركة بسرعة ثابتة: تصل الشخصية إلى البلاطة في MOVE_STEP_MS تقريبًا (pw.speed يُحسب عند تغيّر الوجهة)
   const dx = pw.target.x - pw.pos.x, dz = pw.target.z - pw.pos.z, dist = Math.hypot(dx, dz);
-  const speed = Math.min(pw.speed, pw.natSpeed * 2.2);            // سقف تتبعه الأرجل (مثلًا القفزة إلى السجن)
+  const speed = Math.min(pw.speed, pw.natSpeed * 10);             // سقف للقفزات البعيدة (مثلًا إلى السجن)
   if (dist > 1e-4) {
     const step = Math.min(dist, speed * dt);
     pw.pos.x += dx / dist * step; pw.pos.z += dz / dist * step;
@@ -475,6 +609,13 @@ function updatePawn(pw, id, ms, dt) {
   pw.yaw += angDiff(pw.yaw, want) * (1 - Math.exp(-dt * 10));
   pw.holder.rotation.y = pw.yaw + MODEL_YAW;
   pw.grp.position.set(pw.pos.x, T + tileLiftAt(pw.pos.x, pw.pos.z), pw.pos.z);
+  // دخل السجن للتوّ: يسقط القفص حين تصل الشخصية إلى خانة السجن
+  if (pw.wasJail === undefined) pw.wasJail = p.jail;
+  if (p.jail && !pw.wasJail) pw.cageDue = true;
+  if (!p.jail) pw.cageDue = false;
+  pw.wasJail = p.jail;
+  if (pw.cageDue && dist <= 1e-4 && !pw.cage && !p.bankrupt) { pw.cageDue = false; startCage(pw); }
+  if (pw.cage) stepCage(pw, dt);
   if (pw.mixer) {
     if (p.bankrupt) {
       if (!pw.dead) { pw.dead = true; playAnim(pw, 'Death', { once: true, clamp: true }); pw.hideAt = ms + 2600; }
@@ -484,17 +625,29 @@ function updatePawn(pw, id, ms, dt) {
       pw.once = 0;
       playAnim(pw, moving ? pw.gait : 'Idle');
       // مزامنة الخطوات مع الأرض: سرعة المقطع = السرعة الفعلية ÷ سرعته الطبيعية
-      if (moving && pw.cur) pw.cur.timeScale = THREE.MathUtils.clamp(speed / pw.natSpeed, 0.5, 2.5);
+      if (moving && pw.cur) pw.cur.timeScale = THREE.MathUtils.clamp(speed / pw.natSpeed, 0.5, 3.2);
     }
     pw.mixer.update(dt);
   }
-  pw.tag.position.y += (pw.tagBase + pw.rank * 0.26 - pw.tag.position.y) * (1 - Math.exp(-dt * 8));
+  pw.tag.position.y += (pw.tagBase - pw.tag.position.y) * (1 - Math.exp(-dt * 8));
   if (pw.hideAt && ms > pw.hideAt) pw.grp.visible = false;
-  const mine = (typeof viewerId === 'function' ? viewerId() : G.cur) === id && !G.over && !p.bankrupt;   // بيدقي أنا
-  pw.halo.material.opacity = mine ? 0.75 + 0.25 * Math.sin(ms / 220) : (G.cur === id && !G.over && !p.bankrupt ? 0.35 : 0);
   const hov = S.hoverPawn === id && !p.bankrupt;
-  if (hov) pw.halo.material.opacity = 1;
-  pw.halo.scale.setScalar(hov ? 1.7 : mine ? 1.35 : 1);
+  const named = (hov || hoverTag === id) && pw.grp.visible;         // بطاقة الاسم: تظهر وتختفي بتلاشٍ ناعم
+  const tm = pw.tag.material;
+  tm.opacity += ((named ? 1 : 0) - tm.opacity) * (1 - Math.exp(-dt * 14));
+  pw.tag.visible = tm.opacity > 0.02;
+  // الحلقة بلون اللاعب: تظهر فقط عند المرور على الشخصية (أو بطاقة لاعبها) أو أثناء حركتها
+  const ring = !p.bankrupt && (named || moving) ? 0.9 : 0, hm = pw.halo.material;
+  hm.opacity += (ring - hm.opacity) * (1 - Math.exp(-dt * (ring ? 14 : 5)));
+  pw.halo.visible = hm.opacity > 0.02;
+  pw.halo.scale.setScalar(hov ? 1.7 : 1.25);
+  // صاحب الدور: حدّ أصفر حول شخصيته
+  const playing = G.cur === id && !G.over && !p.bankrupt;
+  if (pw.outline && pw.playing !== playing) {
+    pw.playing = playing;
+    pw.outline.forEach(h => { h.visible = playing; });
+    pw.mats.forEach(m => { m.stencilWrite = playing; });
+  }
 }
 
 /* ---------- النرد: مكعبان مستديرا الحواف يرميان ويستقران على نتيجة الخادم ---------- */
@@ -508,17 +661,53 @@ function pipTexture(v) {
   PIP[v].forEach(k => { g.beginPath(); g.arc(28 + (k % 3) * 36, 28 + Math.floor(k / 3) * 36, 11, 0, Math.PI * 2); g.fill(); });
   return canvasTex(cv);
 }
+/* حين يحين دوري للرمي يطفو النرد فوق اللوحة ويتوهّج (كالنرد في لوحة التحكم) والنقر عليه يرميه */
+let diceMats = [], dLift = 0, hoverDice = false;
+/* الإمساك بالنرد ورميه: اسحبه فيتبع المؤشّر فوق اللوحة، وأفلته بحركة سريعة فيطير في اتجاهها ويستقر هناك */
+let grab = null, throwTo = null, preRoll = 0;
+const _pl = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), clampN = (v, m) => Math.max(-m, Math.min(m, v));
+function dragPoint(e, out) {                                   // موضع المؤشّر على مستوٍ أفقي فوق اللوحة
+  const r = canvas.getBoundingClientRect();
+  raycaster.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+  _pl.constant = -(T + 1.1);
+  if (raycaster.ray.intersectPlane(_pl, _v)) out.set(clampN(_v.x, 6.5), _v.y, clampN(_v.z, 6.5));
+}
+function throwDice(g) {
+  const b = g.pts[g.pts.length - 1], a = g.pts.find(s => b.t - s.t <= 130) || g.pts[0];
+  const dtm = Math.max(16, b.t - a.t) / 1000;
+  let vx = (b.x - a.x) / dtm, vz = (b.z - a.z) / dtm;
+  const sp = Math.hypot(vx, vz);
+  if (sp < 2.2 || performance.now() - b.t > 140) return false;  // بلا اندفاع: يعود النرد إلى مكانه
+  if (sp > 15) { vx *= 15 / sp; vz *= 15 / sp; }
+  throwTo = new THREE.Vector3(clampN(b.x + vx * 0.33, 3.3), 0, clampN(b.z + vz * 0.33, 3.3));
+  dstate = 'spin'; dT0 = preRoll = performance.now();
+  dice.forEach((d, k) => {
+    d.spin.set(7 + Math.random() * 7, 6 + Math.random() * 7, 7 + Math.random() * 7);
+    d.from.copy(d.mesh.position); d.fy = 0; d.mesh.scale.setScalar(1);
+    d.vel = { x: vx * (0.9 + Math.random() * 0.2) + (k ? 0.7 : -0.7), z: vz * (0.9 + Math.random() * 0.2) };
+  });
+  return true;
+}
+const _dq = new THREE.Quaternion(), _de = new THREE.Euler();
+const diceThrowable = () => typeof canThrow === 'function' && canThrow();
+function pickDice(e) {
+  const r = canvas.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  return raycaster.intersectObjects(dice.map(d => d.mesh), false).length > 0;
+}
 function buildDice() {
-  const mats = FACE_VALUES.map(v => new THREE.MeshStandardMaterial({ map: pipTexture(v), roughness: 0.35 }));
+  const mats = diceMats = FACE_VALUES.map(v => new THREE.MeshStandardMaterial({ map: pipTexture(v), roughness: 0.35, emissive: 0xffb300, emissiveIntensity: 0 }));
   const geo = new RoundedBoxGeometry(D_SIZE, D_SIZE, D_SIZE, 4, 0.07);
   for (let k = 0; k < 2; k++) {
     const mesh = new THREE.Mesh(geo, mats);
     mesh.castShadow = true; scene.add(mesh);
-    dice.push({ mesh, from: new THREE.Vector3(), fromQ: new THREE.Quaternion(), to: new THREE.Vector3(), toQ: new THREE.Quaternion(), spin: new THREE.Vector3() });
+    dice.push({ mesh, from: new THREE.Vector3(), fromQ: new THREE.Quaternion(), to: new THREE.Vector3(), toQ: new THREE.Quaternion(), spin: new THREE.Vector3(), fy: 0 });
   }
 }
 function finalPose(d, k, v) {
-  d.to.set((k ? 0.9 : -0.9) + (Math.random() - 0.5) * 0.5, T + D_SIZE / 2, 3.3 + (Math.random() - 0.5) * 0.7);   // أسفل الوسط، بعيدًا عن الشريط
+  if (throwTo) d.to.set(throwTo.x + (k ? 0.45 : -0.45) + (Math.random() - 0.5) * 0.3, T + D_SIZE / 2, throwTo.z + (Math.random() - 0.5) * 0.5);   // حيث رُمي
+  else d.to.set((k ? 0.9 : -0.9) + (Math.random() - 0.5) * 0.5, T + D_SIZE / 2, 3.3 + (Math.random() - 0.5) * 0.7);   // أسفل الوسط، بعيدًا عن الشريط
   const q1 = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(...NORMALS[v]), new THREE.Vector3(0, 1, 0));
   const yaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.random() * Math.PI * 2);
   d.toQ.copy(yaw.multiply(q1));
@@ -530,14 +719,18 @@ function syncDice() {
     dice.forEach((d, k) => { finalPose(d, k, G.dice[k]); d.mesh.position.copy(d.to); d.mesh.quaternion.copy(d.toQ); });
     dstate = 'idle'; diceKey = G.dice.join();
   }
+  if (G.rolling) preRoll = 0;
   if (G.rolling && dstate !== 'spin') {
-    dstate = 'spin'; dT0 = now;
+    dstate = 'spin'; dT0 = now; throwTo = null;
     dice.forEach((d, k) => {
+      d.vel = null;
       d.spin.set(6 + Math.random() * 6, 5 + Math.random() * 7, 6 + Math.random() * 6);
-      d.from.set(k ? 1 : -1, T + 1.2, 2.8);
+      d.from.set(k ? 1 : -1, T + 1.2, 2.8); d.fy = 0; d.mesh.scale.setScalar(1);
     });
+  } else if (!G.rolling && dstate === 'spin' && preRoll && now - preRoll < 2500) {
+    // رمية باليد بدأت حركتها قبل أن يؤكّد المحرّك/الخادم الرمي: ننتظر
   } else if (!G.rolling && dstate === 'spin') {
-    dstate = 'land'; dT0 = now; diceKey = G.dice.join();
+    preRoll = 0; dstate = 'land'; dT0 = now; diceKey = G.dice.join();
     dice.forEach((d, k) => { d.from.copy(d.mesh.position); d.fromQ.copy(d.mesh.quaternion); finalPose(d, k, G.dice[k]); });
   } else if (!G.rolling && dstate === 'idle' && diceKey !== G.dice.join()) {   // القيم تغيّرت بلا رمية (مثلًا إعادة اتصال)
     diceKey = G.dice.join();
@@ -549,8 +742,12 @@ function animateDice(now, dt) {
     const t = (now - dT0) / 1000;
     dice.forEach((d, k) => {
       d.mesh.rotation.x += d.spin.x * dt; d.mesh.rotation.y += d.spin.y * dt; d.mesh.rotation.z += d.spin.z * dt;
-      d.mesh.position.set(d.from.x + Math.sin(t * 2.4 + k) * 0.35, T + 0.9 + Math.abs(Math.sin(t * 5 + k)) * 0.5, d.from.z + Math.cos(t * 2 + k) * 0.3);
+      if (d.vel) {                                             // مرميّ باليد: يندفع في اتجاه الرمية ويتباطأ وهو يرتدّ
+        const s = (1 - Math.exp(-3 * t)) / 3;
+        d.mesh.position.set(clampN(d.from.x + d.vel.x * s, 3.9), T + 0.45 + Math.abs(Math.sin(t * 6 + k)) * 0.55 * (0.35 + 0.65 * Math.exp(-1.5 * t)) + (d.from.y - T - 0.45) * Math.exp(-5 * t), clampN(d.from.z + d.vel.z * s, 3.9));
+      } else d.mesh.position.set(d.from.x + Math.sin(t * 2.4 + k) * 0.35, T + 0.9 + Math.abs(Math.sin(t * 5 + k)) * 0.5, d.from.z + Math.cos(t * 2 + k) * 0.3);
     });
+    if (preRoll && now - preRoll >= 2500 && !G.rolling) syncDice();     // لم يُقبل الرمي: يستقر النرد
   } else if (dstate === 'land') {
     const u = Math.min(1, (now - dT0) / 700), e = 1 - Math.pow(1 - u, 3);
     dice.forEach(d => {
@@ -560,6 +757,31 @@ function animateDice(now, dt) {
     });
     if (u >= 1) dstate = 'idle';
   }
+  // الطفو: يرتفع النرد ويتمايل ويدور ببطء ما دام الرمي متاحًا، ثم يهبط
+  const want = dstate === 'idle' && diceThrowable() ? 1 : 0;
+  if (dstate !== 'idle') dLift = 0;
+  else if (grab) {                                              // في اليد: يتبع المؤشّر ويتقلّب
+    dLift = 1;
+    dice.forEach((d, k) => {
+      _v.set(grab.p.x + (k ? 0.42 : -0.42), grab.p.y + Math.sin(now / 130 + k * 2) * 0.05, grab.p.z);
+      d.mesh.position.lerp(_v, 1 - Math.exp(-dt * 20));
+      d.mesh.rotation.x += dt * (3 + k); d.mesh.rotation.z += dt * (2.4 - k);
+      d.mesh.scale.setScalar(1.12);
+    });
+  } else if (want || dLift > 0) {
+    dLift += (want - dLift) * (1 - Math.exp(-dt * 6));
+    if (!want && dLift < 0.004) dLift = 0;
+    const t = now / 1000;
+    dice.forEach((d, k) => {
+      d.fy += dt * 0.8 * dLift * (k ? -1 : 1);
+      d.mesh.position.copy(d.to); d.mesh.position.y += dLift * (0.55 + Math.sin(t * 2.2 + k * 1.7) * 0.09);
+      _dq.setFromEuler(_de.set(Math.sin(t * 1.3 + k) * 0.2 * dLift, d.fy, Math.cos(t * 1.1 + k * 2) * 0.2 * dLift, 'YXZ'));
+      d.mesh.quaternion.copy(_dq).multiply(d.toQ);
+      d.mesh.scale.setScalar(1 + dLift * (hoverDice ? 0.14 : 0.04));
+    });
+  }
+  const glow = dLift * (hoverDice ? 0.34 : 0.16 + 0.06 * Math.sin(now / 260));
+  diceMats.forEach(m => { m.emissiveIntensity = glow; });
 }
 
 /* ---------- مزامنة الحالة ---------- */
@@ -567,7 +789,7 @@ S.sync = function () {
   if (!S.on || !ready()) return;
   tiles.forEach((t, i) => {
     const key = `${G.owner[i]}|${G.mortgaged[i]}`;
-    if (key !== t.key) { t.key = key; drawTile(t, i); }
+    if (key !== t.key) { t.key = key; drawTile(t, i); syncFlag(t, i); }
     syncHouses(t, i);
   });
   while (pawns.length < G.players.length) pawns.push(makePawn(G.players[pawns.length], pawns.length));
@@ -590,7 +812,7 @@ S.sync = function () {
       const pw = pawns[id], tx = t.cx + (longX ? along : across), tz = t.cz + (longX ? across : along);
       if (tx !== pw.target.x || tz !== pw.target.z) {                     // وجهة جديدة: سرعة ثابتة تصل بها خلال خطوة واحدة
         pw.target.set(tx, 0, tz);
-        pw.speed = Math.max(0.6, Math.hypot(tx - pw.pos.x, tz - pw.pos.z) / (MOVE_STEP_MS / 1000));
+        pw.speed = Math.max(0.6, Math.hypot(tx - pw.pos.x, tz - pw.pos.z) / ((G.stepMs || MOVE_STEP_MS) / 1000));   // G.stepMs أقصر في الرحلات الطويلة
       }
       pw.rank = k % 3;
       if (pw.fresh) { pw.pos.copy(pw.target); pw.fresh = false; }
@@ -660,8 +882,8 @@ S.home = function () {
   if (!W || !H) return;
   const th = Math.tan((FOV * Math.PI) / 360);
   const availW = Math.max(320, W - 740), availH = Math.max(320, H - TOP - BOTTOM);
-  const dH = (FRAME * H) / (2 * th * availW);
-  const dV = (FRAME * Math.sin(HOME_ELEV) * H) / (2 * th * availH);
+  const dH = (VIEW_W * H) / (2 * th * availW);
+  const dV = (VIEW_W * Math.sin(HOME_ELEV) * H) / (2 * th * availH);
   const d = Math.max(dH, dV);
   camera.position.set(0, d * Math.sin(HOME_ELEV), d * Math.cos(HOME_ELEV));
   controls.target.set(0, 0, 0);
@@ -676,6 +898,14 @@ function pick(e) {
   raycaster.setFromCamera(ndc, camera);
   const hit = raycaster.intersectObjects(tiles.map(t => t.mesh), false)[0];
   return hit ? hit.object.userData.tile : -1;
+}
+/* الشخصية تحت المؤشّر (−1 إن لم توجد) */
+function pickPawn(e) {
+  const r = canvas.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  const hit = raycaster.intersectObjects(pawns.filter(pw => pw.grp.visible).map(pw => pw.hit), false)[0];
+  return hit ? hit.object.userData.pawn : -1;
 }
 function setHover(i) {
   if (hover >= 0) tiles[hover].topMat.emissive.setHex(0x000000);
@@ -704,9 +934,36 @@ function buildScenery() {
 
 
   // إطار خشبي دافئ حول اللوحة + ظل تلامس ناعم — ليفصلها عن العشب
-  const wood = new THREE.MeshStandardMaterial({ color: 0xa8662c, roughness: 0.7 }), woodDk = new THREE.MeshStandardMaterial({ color: 0x7c4620, roughness: 0.8 });
-  const rim = new THREE.Mesh(new THREE.BoxGeometry(12.8, 0.15, 12.8), [woodDk, woodDk, wood, woodDk, woodDk, woodDk]);
-  rim.position.y = 0.075; rim.castShadow = rim.receiveShadow = true; scene.add(rim);
+  // إطار خشبي بارز بعروق مرسومة وطلاء لامع، خيط نحاسي على حافته الداخلية وأركان نحاسية
+  const OUT = 13.5, BW = 0.72, FH = 0.27;                     // العرض الخارجي، عرض العارضة، ارتفاع الإطار (أعلى من البلاط بقليل)
+  const wc = mkCanvas(1024, 128), wg = wc.getContext('2d'), wr = rng(31);
+  const wgr = wg.createLinearGradient(0, 0, 0, 128); wgr.addColorStop(0, '#b06f33'); wgr.addColorStop(0.5, '#9c5c26'); wgr.addColorStop(1, '#a9682e');
+  wg.fillStyle = wgr; wg.fillRect(0, 0, 1024, 128);
+  for (let k = 0; k < 70; k++) {                               // عروق الخشب
+    const y0 = wr() * 128, amp = 2 + wr() * 5, ph = wr() * 6, fr = 0.006 + wr() * 0.012;
+    wg.strokeStyle = `rgba(${wr() < 0.5 ? '70,36,10' : '205,150,90'},${0.1 + wr() * 0.22})`; wg.lineWidth = 0.6 + wr() * 1.8;
+    wg.beginPath(); for (let x = 0; x <= 1024; x += 16) wg.lineTo(x, y0 + Math.sin(x * fr + ph) * amp); wg.stroke();
+  }
+  for (let k = 0; k < 4; k++) {                                // عُقَد
+    const x = wr() * 1024, y = 20 + wr() * 88;
+    for (let r = 14; r > 2; r -= 3) { wg.strokeStyle = `rgba(70,36,10,${0.1 + (14 - r) * 0.018})`; wg.lineWidth = 1.2; wg.beginPath(); wg.ellipse(x, y, r * 1.9, r, 0, 0, Math.PI * 2); wg.stroke(); }
+  }
+  const woodTex = canvasTex(wc); woodTex.wrapS = woodTex.wrapT = THREE.RepeatWrapping; woodTex.repeat.set(3, 1);
+  const wood = new THREE.MeshPhysicalMaterial({ map: woodTex, roughness: 0.5, clearcoat: 0.5, clearcoatRoughness: 0.3 });
+  const woodDk = new THREE.MeshStandardMaterial({ color: 0x6b3c1b, roughness: 0.8 });
+  const brass = new THREE.MeshStandardMaterial({ color: 0xd9a93a, metalness: 0.9, roughness: 0.28 });
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(OUT - 0.1, 0.1, OUT - 0.1), woodDk);
+  slab.position.y = 0.05; slab.receiveShadow = true; scene.add(slab);
+  const beamLong = new RoundedBoxGeometry(OUT, FH, BW, 4, 0.07), beamShort = new RoundedBoxGeometry(OUT - BW * 2, FH, BW, 4, 0.07);
+  const inlay = new THREE.BoxGeometry(OUT - BW * 2 + 0.2, 0.012, 0.045), cap = new RoundedBoxGeometry(BW + 0.1, FH + 0.07, BW + 0.1, 4, 0.09);
+  for (let k = 0; k < 4; k++) {
+    const g = new THREE.Group(); g.rotation.y = k * Math.PI / 2;
+    const beam = new THREE.Mesh(k % 2 ? beamShort : beamLong, wood);
+    beam.position.set(0, FH / 2, OUT / 2 - BW / 2); beam.castShadow = beam.receiveShadow = true;
+    const line = new THREE.Mesh(inlay, brass); line.position.set(0, FH + 0.002, OUT / 2 - BW + 0.1);
+    const corner = new THREE.Mesh(cap, brass); corner.position.set(OUT / 2 - BW / 2, (FH + 0.07) / 2, OUT / 2 - BW / 2); corner.castShadow = corner.receiveShadow = true;
+    g.add(beam, line, corner); scene.add(g);
+  }
   const sc = mkCanvas(256, 256), sg = sc.getContext('2d'), gr = sg.createRadialGradient(128, 128, 70, 128, 128, 128);
   gr.addColorStop(0, 'rgba(15,35,10,.55)'); gr.addColorStop(1, 'rgba(15,35,10,0)'); sg.fillStyle = gr; sg.fillRect(0, 0, 256, 256);
   const shadow = new THREE.Mesh(new THREE.PlaneGeometry(17, 17), new THREE.MeshBasicMaterial({ map: canvasTex(sc), transparent: true, depthWrite: false }));
@@ -758,14 +1015,14 @@ function sceneryStep(ms) { if (S.flag) S.flag.rotation.y = Math.sin(ms / 900) * 
 
 S.init = function (cv) {
   try {
-    renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true });
+    renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, stencil: true });   // stencil: لحدّ صاحب الدور
   } catch (err) {
     console.warn('WebGL غير متاح — سيُستعمل العرض المسطّح', err);
     return false;
   }
   canvas = cv;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, matchMedia('(pointer:coarse)').matches ? 1.5 : 2));
-  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 300);
   raycaster = new THREE.Raycaster();
@@ -785,16 +1042,47 @@ S.init = function (cv) {
 
   buildStatic(); buildScenery(); buildTiles(); buildDice();
 
+  // الإمساك بالنرد الطافي (بالتقاط الحدث قبل OrbitControls حتى لا تدور الكاميرا)
+  cv.addEventListener('pointerdown', e => {
+    if (e.button !== 0 || dstate !== 'idle' || !diceThrowable() || !pickDice(e)) return;
+    e.stopImmediatePropagation(); e.preventDefault();
+    try { cv.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    grab = { id: e.pointerId, x0: e.clientX, y0: e.clientY, moved: false, pts: [], p: dice[0].mesh.position.clone().lerp(dice[1].mesh.position, 0.5) };
+    dragPoint(e, grab.p); grab.pts.push({ x: grab.p.x, z: grab.p.z, t: performance.now() });
+    cv.style.cursor = 'grabbing';
+  }, true);
+  cv.addEventListener('pointermove', e => {
+    if (!grab || e.pointerId !== grab.id) return;
+    e.stopImmediatePropagation();
+    if (Math.hypot(e.clientX - grab.x0, e.clientY - grab.y0) > 6) grab.moved = true;
+    dragPoint(e, grab.p); grab.pts.push({ x: grab.p.x, z: grab.p.z, t: performance.now() });
+    if (grab.pts.length > 10) grab.pts.shift();
+  }, true);
+  const releaseDice = e => {
+    if (!grab || e.pointerId !== grab.id) return;
+    e.stopImmediatePropagation();
+    const g = grab; grab = null; hoverDice = false; cv.style.cursor = 'grab';
+    if (e.type !== 'pointerup' || !diceThrowable()) return;
+    if (!g.moved || throwDice(g)) ACTIONS.roll();              // نقرة بلا سحب ترمي أيضًا؛ سحب بلا اندفاع يعيد النرد
+  };
+  cv.addEventListener('pointerup', releaseDice, true);
+  cv.addEventListener('pointercancel', releaseDice, true);
+
   let down = null;
   cv.addEventListener('pointermove', e => {
     if (e.buttons) { if (down && S.follow && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6) S.setFollow(false); return; }
-    const i = pick(e); if (i !== hover) setHover(i); cv.style.cursor = i >= 0 ? 'pointer' : 'grab'; });
-  cv.addEventListener('pointerleave', () => setHover(-1));
+    hoverTag = pickPawn(e); hoverDice = diceThrowable() && pickDice(e);
+    const i = hoverDice ? -1 : pick(e); if (i !== hover) setHover(i); cv.style.cursor = i >= 0 || hoverTag >= 0 || hoverDice ? 'pointer' : 'grab'; });
+  cv.addEventListener('pointerleave', () => { setHover(-1); hoverTag = -1; hoverDice = false; });
   cv.addEventListener('pointerdown', e => { down = { x: e.clientX, y: e.clientY, b: e.button }; });
   cv.addEventListener('pointerup', e => {
     if (!down) return;
     const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y), b = down.b; down = null;
     if (moved > 6 || b !== 0) return;
+    if (e.pointerType !== 'mouse') {                              // باللمس لا يوجد مرور: نقرة على الشخصية تُظهر اسمها
+      const pw = pickPawn(e); hoverTag = pw;
+      if (pw >= 0) return;
+    }
     const i = pick(e); if (i >= 0) ACTIONS.deed(i);
   });
 

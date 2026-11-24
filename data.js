@@ -6,12 +6,25 @@
 
 const CUR = 'د.ت';
 
+// لون كل مقعد
 const TOKENS = [
-  // الترتيب يطابق MONSTERS في scene3d.js: قطة، كلب، دجاجة، نينجا، فطر، فضائي
-  { icon: '🐱', color: '#c0392b' }, { icon: '🐶', color: '#2e7d32' },
-  { icon: '🐔', color: '#e67e22' }, { icon: '🥷', color: '#1565c0' },
-  { icon: '🍄', color: '#6a1b9a' }, { icon: '👽', color: '#00838f' },
+  { color: '#c0392b' }, { color: '#2e7d32' }, { color: '#e67e22' },
+  { color: '#1565c0' }, { color: '#6a1b9a' }, { color: '#00838f' },
 ];
+// الشخصيات التي يختار منها كل لاعب (النموذج ثلاثي الأبعاد: models/<file>)
+const CHARS = [
+  { file: 'Cow.glb', icon: '🐮', name: 'بقرة' }, { file: 'Cat.glb', icon: '🐱', name: 'قطّ' },
+  { file: 'Mouse.glb', icon: '🐭', name: 'فأر' }, { file: 'Bear.glb', icon: '🐻', name: 'دبّ' },
+  { file: 'Rabbit.glb', icon: '🐰', name: 'أرنب' }, { file: 'Pig.glb', icon: '🐷', name: 'خنزير' },
+  { file: 'Wolf.glb', icon: '🐺', name: 'ذئب' }, { file: 'Monkey.glb', icon: '🐵', name: 'قرد' },
+  { file: 'Cheetah.glb', icon: '🐆', name: 'فهد' }, { file: 'Panda.glb', icon: '🐼', name: 'باندا' },
+  { file: 'Lion.glb', icon: '🦁', name: 'أسد' },
+];
+// إعداد لاعب في مقعد معيّن بالشخصية المختارة (الافتراضي: شخصية بترتيب المقعد)
+function tokenFor(seat, char) {
+  const c = CHARS[char] ? char : seat % CHARS.length;
+  return { color: TOKENS[seat].color, char: c, icon: CHARS[c].icon };
+}
 
 const GROUPS = {
   brown:  { name: 'البني',          color: '#8b5a3c', house: 50 },

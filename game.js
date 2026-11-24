@@ -10,7 +10,8 @@ const START_CASH = 1500;
 const GO_SALARY = 200;
 const JAIL_FINE = 50;
 const JAIL_POS = 10;
-const MOVE_STEP_MS = 650;   // مدة عبور كل بلاطة (ملّي ثانية): كلما زادت صارت الحركة أبطأ — scene3d.js يضبط سرعة خطوات الشخصية عليها
+const MOVE_MAX_MS = 3000, MOVE_MIN_STEP_MS = 80;   // سقف مدة الرحلة كاملة، وأقصر مدة للبلاطة الواحدة
+const MOVE_STEP_MS = 380;   // مدة عبور كل بلاطة (ملّي ثانية): كلما زادت صارت الحركة أبطأ — scene3d.js يضبط سرعة خطوات الشخصية عليها
 
 const sleep = ms => (G.fast ? Promise.resolve() : new Promise(r => setTimeout(r, ms)));
 function shuffle(a) {
@@ -24,14 +25,14 @@ function shuffle(a) {
 function newGame(configs) {
   Object.assign(G, {
     players: configs.map((c, i) => ({
-      id: i, name: c.name, color: c.color, icon: c.icon,
+      id: i, name: c.name, color: c.color, icon: c.icon, char: c.char,
       pos: 0, cash: START_CASH, jail: false, jailTurns: 0, jailCards: [], bankrupt: false, played: false,
     })),
     cur: 0, phase: 'roll', dice: [1, 1], rolling: false, extra: false, doubles: 0,
     owner: Array(40).fill(null), houses: Array(40).fill(0), mortgaged: Array(40).fill(false),
     houseBank: 32, hotelBank: 12,
     decks: { chance: shuffle(CHANCE.map((_, i) => i)), chest: shuffle(CHEST.map((_, i) => i)) },
-    log: [], debt: null, auction: null, card: null, special: null,
+    log: [], debt: null, auction: null, card: null, special: null, trade: null,
     over: false, winner: null, deadline: 0, turnMs: 20000, acted: false, grace: false,
   });
   log(`بدأت اللعبة! الدور الأول: ${cp().name}`);
@@ -196,6 +197,7 @@ function forfeitPlayer(pid) {
 }
 
 /* ---------- الدور ---------- */
+const AUTO_END_MS = 900;
 function afterAction() {
   if (G.over) { R(); return; }
   const p = cp();
@@ -205,6 +207,12 @@ function afterAction() {
     log(`${p.name} رمى زوجًا — يرمي مرة أخرى.`);
   } else {
     G.phase = 'end';
+    // لا عقارات له = لا بناء ولا رهن: ليس لديه ما يفعله، فينتهي دوره تلقائيًا بعد لحظة (ليرى نتيجة حركته)
+    if (!G.owner.includes(p.id)) {
+      if (G.fast) { endTurn(); return; }
+      const turn = G.cur;
+      setTimeout(() => { if (!G.over && G.cur === turn && G.phase === 'end') endTurn(); }, AUTO_END_MS);
+    }
   }
   R();
 }
@@ -215,6 +223,7 @@ function endTurn(force) {
   let n = G.cur;
   do { n = (n + 1) % G.players.length; } while (G.players[n].bankrupt);
   cp().played = true;   // أنهى دورته الأولى → يحق له الشراء بعدها
+  G.trade = null;       // عرض بيع/تبادل لم يُجَب عليه يسقط بانتهاء الدور
   G.cur = n; G.doubles = 0; G.extra = false; G.phase = 'roll'; G.special = null;
   log(`— دور ${cp().name} —`);
   startTurnTimer();
@@ -310,6 +319,8 @@ async function doRoll() {
 async function moveBy(p, n) {
   G.phase = 'moving';
   const steps = Math.abs(n), dir = n >= 0 ? 1 : 39;
+  // المسافات الطويلة (بطاقة «تقدّم إلى...») تُقطع أسرع: الرحلة كلها لا تتجاوز MOVE_MAX_MS تقريبًا
+  G.stepMs = Math.round(Math.max(MOVE_MIN_STEP_MS, Math.min(MOVE_STEP_MS, MOVE_MAX_MS / Math.max(1, steps))));
   for (let k = 0; k < steps; k++) {
     p.pos = (p.pos + dir) % 40;
     if (n > 0 && p.pos === 0) {
@@ -317,8 +328,9 @@ async function moveBy(p, n) {
       log(`${p.name} قبض ${GO_SALARY} ${CUR} عند «انطلق».`);
     }
     R();
-    await sleep(MOVE_STEP_MS);
+    await sleep(G.stepMs);
   }
+  G.stepMs = MOVE_STEP_MS;
   land(p);
 }
 
@@ -386,6 +398,13 @@ function buy() {
   if (G.phase !== 'buy' || p.cash < s.price) return;
   p.cash -= s.price; G.owner[i] = p.id;
   log(`${p.name} اشترى ${s.name} بـ ${s.price} ${CUR}.`);
+  afterAction();
+}
+
+// تخطّي الشراء: يبقى العقار للبنك بلا مزاد
+function passBuy() {
+  if (G.phase !== 'buy') return;
+  log(`${cp().name} لم يشترِ ${SPACES[cp().pos].name}.`);
   afterAction();
 }
 
@@ -502,6 +521,61 @@ function checkAuction() {
     log(`${w.name} ربح المزاد على ${SPACES[a.i].name} بـ ${a.bid} ${CUR}.`);
     G.auction = null; afterAction();
   }
+}
+
+/* ---------- البيع والتبادل بين اللاعبين ----------
+   صاحب الدور يعرض عقارًا له (give) على لاعب آخر مقابل مال و/أو عقار من عقارات ذلك اللاعب (take).
+   cash > 0: الطرف الآخر يدفع لصاحب العرض؛ cash < 0: صاحب العرض يضيف مالًا. العرض يبقى معلّقًا حتى يُقبل أو يُرفض أو يُلغى.
+   العقار المرهون ينتقل مرهونًا، ولا يُباع عقار في مجموعته مبانٍ. */
+function tradableErr(i, pid) {
+  const s = SPACES[i];
+  if (!s || !s.price || G.owner[i] !== pid) return 'ليس من عقاراته';
+  if (s.group && groupIdx(s.group).some(j => G.houses[j] > 0)) return 'بِع مباني المجموعة أولًا';
+  return null;
+}
+function tradeErr(t) {
+  const a = G.players[t.from], b = G.players[t.to];
+  if (!a || !b || t.from === t.to || a.bankrupt || b.bankrupt) return 'لاعب غير صالح';
+  if (!Number.isInteger(t.cash)) return 'مبلغ غير صالح';
+  const e = tradableErr(t.give, t.from) || (t.take !== null ? tradableErr(t.take, t.to) : null);
+  if (e) return e;
+  if (t.take === null && t.cash <= 0) return 'اطلب مالًا أو عقارًا في المقابل';
+  if (t.cash > 0 && b.cash < t.cash) return `${b.name} لا يملك هذا المبلغ`;
+  if (t.cash < 0 && a.cash < -t.cash) return 'لا تملك هذا المبلغ';
+  return null;
+}
+// يرجع null عند النجاح أو نص الخطأ
+function proposeTrade(to, give, take, cash) {
+  if (G.trade || G.over || !manageAllowed()) return 'لا يمكن العرض الآن';
+  const t = { from: G.cur, to, give, take: take === undefined ? null : take, cash: cash || 0 };
+  const e = tradeErr(t);
+  if (e) return e;
+  G.trade = t;
+  log(`${cp().name} يعرض ${SPACES[give].name} على ${G.players[to].name}.`);
+  R();
+  return null;
+}
+function answerTrade(ok) {
+  const t = G.trade;
+  if (!t) return;
+  G.trade = null;
+  const a = G.players[t.from], b = G.players[t.to];
+  if (ok && !tradeErr(t)) {
+    G.owner[t.give] = t.to;
+    if (t.take !== null) G.owner[t.take] = t.from;
+    a.cash += t.cash; b.cash -= t.cash;
+    const money = t.cash > 0 ? `${t.cash} ${CUR}` : '', prop = t.take !== null ? SPACES[t.take].name : '';
+    log(`${b.name} أخذ ${SPACES[t.give].name} من ${a.name} مقابل ${[prop, money].filter(Boolean).join(' و ')}${t.cash < 0 ? ` (و${a.name} أضاف ${-t.cash} ${CUR})` : ''}.`);
+  } else {
+    log(`${b.name} رفض عرض ${a.name}.`);
+  }
+  R();
+}
+function cancelTrade() {
+  if (!G.trade) return;
+  G.trade = null;
+  log(`${cp().name} سحب عرضه.`);
+  R();
 }
 
 /* ---------- البناء والرهن ---------- */

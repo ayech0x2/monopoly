@@ -22,12 +22,13 @@ const uiManage = () => manageAllowed() && isMyTurn();
 /* ---------- إرسال الأفعال: محرك محلي أو خادم ---------- */
 const LOCAL = {
   roll: () => doRoll(), buy: () => buy(), end: () => endTurn(),
-  declinebuy: () => { if (G.phase === 'buy') startAuction(cp().pos); },
+  declinebuy: () => { if (G.phase === 'buy') startAuction(cp().pos); }, passbuy: () => passBuy(),
   payjail: () => payJail(), usecard: () => useJailCard(),
   taxflat: () => payTax('flat'), taxpct: () => payTax('pct'), cardok: () => applyCard(),
   settle: () => settleDebt(), bankrupt: () => declareBankruptcy(),
   bid: n => auctionBid(n), pass: () => auctionPass(),
   build: i => build(i), sellhouse: i => sellHouse(i), mortgage: i => mortgage(i), unmortgage: i => unmortgage(i),
+  trade: a => proposeTrade(a.to, a.give, a.take, a.cash), tradeyes: () => answerTrade(true), tradeno: () => answerTrade(false), tradecancel: () => cancelTrade(),
 };
 function dispatch(t, a) {
   if (NET.on) NET.send({ t: 'act', m: { t, a } });
@@ -47,10 +48,18 @@ function renderSetup() {
   $('#count-picker').innerHTML = [2, 3, 4, 5, 6].map(n =>
     `<button class="chip ${n === UI.count ? 'on' : ''}" data-act="count" data-arg="${n}">${n}</button>`).join('');
   const old = [...document.querySelectorAll('.pname')].map(i => i.value);
-  $('#name-inputs').innerHTML = Array.from({ length: UI.count }, (_, i) =>
-    `<div class="name-row"><span class="tk" style="background:${TOKENS[i].color}">${TOKENS[i].icon}</span>
-     <input class="pname" maxlength="14" value="${esc(old[i] || 'لاعب ' + (i + 1))}"></div>`).join('');
+  $('#name-inputs').innerHTML = Array.from({ length: UI.count }, (_, i) => {
+    const t = tokenFor(i, UI.chars[i]);
+    return `<div class="name-row">${charButton(i, t.color, t.icon)}
+     <input class="pname" maxlength="14" value="${esc(old[i] || 'لاعب ' + (i + 1))}"></div>${UI.pick === i ? charPicker(t.char) : ''}`;
+  }).join('');
 }
+/* اختيار الشخصية: زرّ الأيقونة يفتح صفّ الشخصيات تحت اللاعب */
+UI.chars = []; UI.pick = null;
+const charButton = (i, color, icon) =>
+  `<button class="tk pick" style="background:${color}" data-act="pickchar" data-arg="${i}" title="غيّر الشخصية">${icon}</button>`;
+const charPicker = cur => `<div class="char-picker">${CHARS.map((c, k) =>
+  `<button class="char ${k === cur ? 'on' : ''}" data-act="setchar" data-arg="${k}" title="${c.name}">${c.icon}</button>`).join('')}</div>`;
 
 /* ---------- اللوحة ---------- */
 function buildBoard() {
@@ -170,6 +179,18 @@ function renderLog() {
 const btn = (label, act, arg, cls = '', dis = false) =>
   `<button class="btn ${cls}" data-act="${act}" ${arg !== undefined ? `data-arg="${arg}"` : ''} ${dis ? 'disabled' : ''}>${label}</button>`;
 
+const buyButtons = (p, s) => btn(`اشترِ بـ ${s.price} ${CUR}`, 'buy', undefined, 'green', p.cash < s.price) + btn('تخطَّ', 'passbuy', undefined, 'ghost') + (p.cash < s.price ? btn('مزاد', 'declinebuy', undefined, 'ghost') + btn('ارهن عقاراتك', 'manage', undefined, 'ghost') : '');   // المزاد فقط لمن لا يملك الثمن
+/* أزرار البطاقة المعروضة وسط الشاشة في وضع 3D (صك الشراء، أو بطاقة حظ/صندوق الجماعة)؛
+   scene3d.js يضعها تحت البطاقة ويُظهرها عند وصولها */
+function renderBuyBar() {
+  const mine = UI.hud && !G.over && isMyTurn();
+  const html = !mine ? '' : G.phase === 'buy' ? buyButtons(cp(), SPACES[cp().pos]) : G.phase === 'card' && G.card ? btn('حسنًا', 'cardok', undefined, 'green') : '';
+  const on = html !== '';
+  const el = $('#buybar');
+  if (el.innerHTML !== html) el.innerHTML = html;
+  if (!on) el.classList.remove('show');
+}
+
 function renderCenter() {
   const p = cp(), ph = G.phase;
   const dice = UI.faces || G.dice;
@@ -188,10 +209,10 @@ function renderCenter() {
   } else if (ph === 'buy') {
     const s = SPACES[p.pos];
     info = `${esc(s.name)} غير مملوك — السعر ${s.price} ${CUR}`;
-    btns = btn(`اشترِ بـ ${s.price} ${CUR}`, 'buy', undefined, 'green', p.cash < s.price) + btn('مزاد', 'declinebuy', undefined, 'ghost') + (p.cash < s.price ? btn('ارهن عقاراتك', 'manage', undefined, 'ghost') : '');
+    btns = UI.hud ? '' : buyButtons(p, s);                      // في وضع 3D الأزرار تحت بطاقة الصك وسط الشاشة (renderBuyBar)
   } else if (ph === 'card' && G.card) {
     info = `${G.card.kind === 'chance' ? '❓ حظ' : '🎁 صندوق الجماعة'}: ${esc(G.card.card.text)}`;
-    btns = btn('حسنًا', 'cardok');
+    btns = UI.hud ? '' : btn('حسنًا', 'cardok');                // في وضع 3D الزر تحت البطاقة (renderBuyBar)
   } else if (ph === 'end') {
     info = 'يمكنك البناء أو الرهن قبل إنهاء دورك';
     btns = btn('إنهاء الدور ⏭', 'end', undefined, 'red');
@@ -286,7 +307,43 @@ function deedHTML(i) {
     rows = row('', esc(s.name));
   }
   const price = s.price ? `<p>السعر: <b>${s.price} ${CUR}</b> — ${ownerTxt}</p>` : '';
-  return `<div class="box deed">${ribbon('صك الملكية')}${head}${price}<table>${rows}</table><div class="acts"><button class="btn" data-act="closeDeed">إغلاق</button></div></div>`;
+  const sell = o !== null && o === viewerId() && uiManage() && !G.trade && !tradableErr(i, o) ? btn('بيع / تبادل', 'tradeopen', i, 'green') : '';
+  return `<div class="box deed">${ribbon('صك الملكية')}${head}${price}<table>${rows}</table><div class="acts">${sell}<button class="btn" data-act="closeDeed">إغلاق</button></div></div>`;
+}
+
+/* ---------- البيع والتبادل ---------- */
+const propChip = i => `<span class="tprop"><i style="background:${SPACES[i].group ? GROUPS[SPACES[i].group].color : '#888'}"></i>${esc(SPACES[i].name)}${G.mortgaged[i] ? ' <small>(مرهون)</small>' : ''}</span>`;
+// نافذة إعداد العرض: لمن، وماذا تطلب في المقابل
+function tradeHTML() {
+  const d = UI.trade, me = cp();
+  const others = G.players.filter(p => !p.bankrupt && p.id !== me.id);
+  if (d.to === null || !others.some(p => p.id === d.to)) d.to = others.length ? others[0].id : null;
+  const to = d.to === null ? null : G.players[d.to];
+  const theirs = to ? SPACES.map((s, i) => i).filter(i => G.owner[i] === to.id && !tradableErr(i, to.id)) : [];
+  if (!theirs.includes(d.take)) d.take = null;
+  return `<div class="box trade">${ribbon('بيع / تبادل')}
+    <p>تعرض: ${propChip(d.give)}</p>
+    <h4>على من؟</h4>
+    <div class="acts">${others.map(p => `<button class="btn sm ${p.id === d.to ? '' : 'ghost'}" data-act="tradeto" data-arg="${p.id}">${p.icon} ${esc(p.name)} <small>(${p.cash} ${CUR})</small></button>`).join('') || 'لا يوجد لاعبون آخرون'}</div>
+    <h4>ماذا تطلب في المقابل؟</h4>
+    <label class="trow">مال يدفعه لك <input id="tradeAsk" type="number" min="0" max="${to ? to.cash : 0}" placeholder="0" value="${esc(d.ask)}"></label>
+    ${theirs.length ? `<div class="tlabel">أو/و عقار من عقاراته (اختياري):</div><div class="acts">${theirs.map(i => `<button class="btn sm ${i === d.take ? '' : 'ghost'}" data-act="tradetake" data-arg="${i}">${propChip(i)}</button>`).join('')}</div>` : ''}
+    <label class="trow">مال تضيفه أنت <input id="tradeAdd" type="number" min="0" max="${me.cash}" placeholder="0" value="${esc(d.add)}"></label>
+    <p class="warn terr">${esc(d.err || '')}</p>
+    <div class="acts">${btn('أرسل العرض', 'tradesend', undefined, 'green', !to)}${btn('إلغاء', 'tradeclose', undefined, 'ghost')}</div></div>`;
+}
+// العرض المعلّق: يراه الجميع، ويردّ عليه من وُجِّه إليه (محليًا: من يجلس أمام الجهاز)
+function tradeOfferHTML() {
+  const t = G.trade, a = G.players[t.from], b = G.players[t.to];
+  const local = UI.viewer === null, mineToAnswer = local || UI.viewer === t.to, mineToCancel = !local && UI.viewer === t.from;
+  const wants = [t.take !== null ? propChip(t.take) : '', t.cash > 0 ? `<b>${t.cash} ${CUR}</b>` : ''].filter(Boolean).join(' و ');
+  const extra = t.cash < 0 ? `<p>ويضيف ${esc(a.name)} من عنده: <b>${-t.cash} ${CUR}</b></p>` : '';
+  return `<div class="box trade">${ribbon('عرض بيع / تبادل')}
+    <p><b style="color:${a.color}">${a.icon} ${esc(a.name)}</b> يعرض على <b style="color:${b.color}">${b.icon} ${esc(b.name)}</b>:</p>
+    <p>يعطيه: ${propChip(t.give)}</p>
+    ${wants ? `<p>مقابل: ${wants}</p>` : ''}${extra}
+    ${mineToAnswer ? `<div class="acts">${btn('أقبل', 'tradeyes', undefined, 'green')}${btn('أرفض', 'tradeno', undefined, 'red')}</div>`
+      : `<p>⏳ بانتظار ردّ ${esc(b.name)}...</p>${mineToCancel ? `<div class="acts">${btn('اسحب العرض', 'tradecancel', undefined, 'ghost')}</div>` : ''}`}</div>`;
 }
 
 function manageHTML() {
@@ -318,6 +375,8 @@ function manageHTML() {
       const em = canMortgage(i, p.id);
       b += `<button class="btn sm red" data-act="mortgage" data-arg="${i}" ${em ? 'disabled' : ''} ${tip(em)}>رهن +${s.price / 2}</button>`;
     }
+    const et = G.trade ? 'يوجد عرض معلّق' : tradableErr(i, p.id);
+    b += `<button class="btn sm" data-act="tradeopen" data-arg="${i}" ${et ? 'disabled' : ''} ${tip(et)}>بيع / تبادل</button>`;
     h += `<div class="prow"><i class="chip-c" style="background:${col}"></i>
       <div><b>${esc(s.name)}</b> <span class="st">${st}</span></div><div class="bt">${b}</div></div>`;
   });
@@ -329,7 +388,7 @@ function auctionHTML() {
   const a = G.auction, s = SPACES[a.i];
   const p = G.players[a.order[a.idx]];
   const top = a.bidder === null ? 'لا عروض بعد' : `${a.bid} ${CUR} من ${esc(G.players[a.bidder].name)}`;
-  const mine = viewerId() === p.id;
+  const mine = UI.viewer === null || UI.viewer === p.id;      // محليًا (جهاز واحد): صاحب الدور في المزاد هو من يعرض، لا صاحب دور اللعب
   const inc = [10, 50, 100].map(n =>
     btn(`+${n}`, 'bid', a.bid + n, '', a.bid + n > p.cash)).join('');
   return `<div class="box">${ribbon('مزاد')}<h2>${esc(s.name)}</h2>
@@ -352,7 +411,7 @@ function buyHTML() {
         <span class="em">${s.icon || '🏠'}</span><span class="pp">${s.price} ${CUR}</span></div>
       <div class="det"><small>عقار</small><h2>${esc(s.name)}</h2>
         <p>السعر ${s.price} ${CUR} · الإيجار ${rent}</p><p>رصيدك: <b>${p.cash} ${CUR}</b></p>${setInfo}
-        <div class="acts">${btn('اشترِ', 'buy', undefined, 'green', poor)}${btn('تخطَّ (مزاد)', 'declinebuy', undefined, 'ghost')}${poor ? btn('ارهن عقاراتك', 'manage', undefined, 'ghost') : ''}</div>
+        <div class="acts">${btn('اشترِ', 'buy', undefined, 'green', poor)}${btn('تخطَّ', 'passbuy', undefined, 'ghost')}${poor ? btn('مزاد', 'declinebuy', undefined, 'ghost') + btn('ارهن عقاراتك', 'manage', undefined, 'ghost') : ''}</div>
       </div></div></div>`;
 }
 
@@ -362,6 +421,11 @@ function renderModal() {
   if (G.over) {
     h = `<div class="box card-modal">${ribbon('النهاية')}<h2>🏆</h2><div class="txt">فاز <b>${esc(G.winner.name)}</b> بكل شيء!</div>
       <div class="acts">${btn('لعبة جديدة', 'newgame', undefined, 'red')}</div></div>`;
+  } else if (G.trade) {
+    UI.trade = null;
+    h = tradeOfferHTML();
+  } else if (UI.trade && uiManage()) {
+    h = tradeHTML();
   } else if (G.phase === 'card' && G.card && !UI.hud) {
     const k = G.card.kind;
     h = `<div class="box card-modal ${k}">${ribbon(k === 'chance' ? 'حظ' : 'صندوق الجماعة')}<div class="kind">${k === 'chance' ? '❓' : '🎁'}</div>
@@ -417,7 +481,7 @@ function renderHud() {
       ${now ? '<span class="ptr"></span>' : ''}
       <span class="portrait"><span class="face">${p.icon}</span>
         <span class="shield" title="عقارات">${n}</span>
-        <span class="chip2"><b class="coin"></b>${p.cash}</span></span>
+        <span class="chip2"><b class="coin"></b><span class="amt">${shownCash(p)}</span><small>${CUR}</small></span></span>
       <span class="body">
         <span class="rib"><b>${esc(p.name)}</b>${me ? '<small>أنت</small>' : ''}</span>
         <span class="plate">${p.bankrupt ? '<span class="bk">أفلس</span>' : `<span class="st" title="عقارات">${IC.land}<b>${n}</b></span><span class="st" title="مبانٍ">${IC.house}<b>${bld}</b></span>${flags}`}</span>
@@ -429,7 +493,7 @@ function renderHud() {
   const p = cp(), t = SPACES[p.pos];
   $('#hudturn').innerHTML = G.over
     ? `<div class="turnpill"><span class="tx"><b>انتهت اللعبة</b><small>فاز ${esc(G.winner.name)}</small></span></div>`
-    : `<div class="turnpill"><span class="tx"><b>${NET.on && isMyTurn() ? 'دورك' : 'دور ' + esc(p.name)}</b><small>${G.grace ? '⚠️ فرصة أخيرة قبل الطرد' : esc(t.name) + ' · ' + (PHASE_TXT[G.phase] || '')}</small></span>
+    : `<div class="turnpill"><span id="hudbank" title="البنك">🏦</span><span class="tx"><b>${NET.on && isMyTurn() ? 'دورك' : 'دور ' + esc(p.name)}</b><small>${G.grace ? '⚠️ فرصة أخيرة قبل الطرد' : esc(t.name) + ' · ' + (PHASE_TXT[G.phase] || '')}</small></span>
         <span class="clk" id="tleft" title="الوقت المتبقي للدور"></span><span class="clk" id="clk" title="مدة اللعبة">${clockText()}</span></div>`;
 
   const log = $('#hudlog');
@@ -441,6 +505,104 @@ function renderHud() {
   renderHand();
   $('#btnfollow').classList.toggle('on', !!(window.S3D && S3D.follow));
   if (UI.lastCur !== G.cur && !G.over) { UI.lastCur = G.cur; showBanner(); }
+}
+
+/* ---------- حركة النقود (وضع 3D) ----------
+   عند كل تغيّر في الأرصدة تطير عملات من الدافع إلى القابض: بين لاعبَين (إيجار...) أو بين لاعب والبنك 🏦
+   (شراء، ضريبة، راتب الانطلاق...)، ويظهر المبلغ ‎+/−‎ بجانب رصيد كل لاعب. */
+let lastCash = null;
+function coinFx() {
+  if (!UI.hud || !G.players) { lastCash = null; return; }
+  const cash = G.players.map(p => p.cash), prev = lastCash;
+  lastCash = cash;
+  if (!prev || prev.length !== cash.length) return;
+  const d = cash.map((c, i) => c - prev[i]);
+  if (!d.some(Boolean)) return;
+  // من خسر يدفع لمن ربح في التحديث نفسه، والباقي من/إلى البنك
+  const left = d.map(v => Math.max(0, v)), flows = [];
+  d.forEach((v, from) => {
+    let need = -v;
+    for (let to = 0; need > 0 && to < d.length; to++) {
+      const take = Math.min(need, left[to]);
+      if (take > 0) { flows.push([from, to, take]); need -= take; left[to] -= take; }
+    }
+    if (need > 0) flows.push([from, 'bank', need]);
+  });
+  left.forEach((v, to) => { if (v > 0) flows.push(['bank', to, v]); });
+  const spot = who => {
+    const el = who === 'bank' ? $('#hudbank') : document.querySelector(`#hudplayers .hp[data-arg="${who}"] .chip2`);
+    const r = el && el.getBoundingClientRect();
+    return r && r.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
+  };
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // الأرقام تعدّ نحو قيمتها الجديدة: الدافع فورًا، والقابض عند وصول العملات
+  d.forEach((v, i) => { if (v) { cashRoll[i] = { from: cashRoll[i] ? cashRoll[i].val : prev[i], to: cash[i], val: cashRoll[i] ? cashRoll[i].val : prev[i], t0: performance.now() + (v > 0 && !still ? 750 : 0) }; } });
+  if (!cashTick) cashTick = requestAnimationFrame(rollCash);
+  txFeed(flows);
+  flows.forEach(([from, to, amt]) => {
+    const a = spot(from), b = spot(to);
+    if (!a || !b || still) return;
+    const n = Math.max(4, Math.min(14, Math.ceil(amt / 30)));
+    for (let k = 0; k < n; k++) {
+      const c = document.createElement('i');
+      c.className = 'coinfx';
+      document.body.appendChild(c);
+      const jx = (Math.random() - 0.5) * 26, jy = (Math.random() - 0.5) * 18;
+      const mx = (a.x + b.x) / 2 + jx * 2, my = Math.max(a.y, b.y) + 45 + Math.random() * 45;   // قوس يتدلّى تحت الشريط العلوي ليُرى
+      const at = (x, y, s, o) => ({ transform: `translate(${x}px, ${y}px) translate(-50%, -50%) scale(${s})`, opacity: o });
+      c.animate([at(a.x + jx, a.y + jy, 0.5, 0), { ...at(a.x + jx, a.y + jy, 1.1, 1), offset: 0.12 }, { ...at(mx, my, 1.15, 1), offset: 0.55 }, { ...at(b.x, b.y, 0.9, 1), offset: 0.92 }, at(b.x, b.y, 0.4, 0)],
+        { duration: 1000, delay: k * 65, easing: 'cubic-bezier(.45,.05,.4,1)', fill: 'both' }).onfinish = () => c.remove();
+    }
+    setTimeout(() => { const e2 = to === 'bank' ? $('#hudbank') : document.querySelector(`#hudplayers .hp[data-arg="${to}"] .chip2`); if (e2) e2.animate([{ scale: 1, filter: 'brightness(1)' }, { scale: 1.3, filter: 'brightness(1.5)' }, { scale: 1, filter: 'brightness(1)' }], { duration: 420, iterations: 2 }); }, 900);
+  });
+  d.forEach((v, i) => {                                   // المبلغ يطفو بجانب رصيد اللاعب
+    const s = v && spot(i);
+    if (!s) return;
+    const t = document.createElement('b');
+    t.className = `cashpop ${v > 0 ? 'up' : 'down'}`; t.textContent = `${v > 0 ? '+' : '−'}${Math.abs(v)}`;
+    t.style.left = `${s.x}px`; t.style.top = `${s.y + 22}px`;
+    document.body.appendChild(t);
+    t.animate([{ transform: 'translate(-50%, 0)', opacity: 0 }, { transform: 'translate(-50%, 8px)', opacity: 1, offset: 0.15 }, { transform: 'translate(-50%, 14px)', opacity: 1, offset: 0.75 }, { transform: 'translate(-50%, 26px)', opacity: 0 }],
+      { duration: 2400, delay: v > 0 ? 750 : 0, easing: 'ease-out', fill: 'both' }).onfinish = () => t.remove();
+  });
+}
+/* الرصيد المعروض يعدّ تصاعديًا/تنازليًا نحو الرصيد الحقيقي */
+const cashRoll = {};
+let cashTick = 0;
+const shownCash = p => (cashRoll[p.id] ? Math.round(cashRoll[p.id].val) : p.cash);
+function rollCash(now) {
+  cashTick = 0;
+  let busy = false;
+  for (const id of Object.keys(cashRoll)) {
+    const r = cashRoll[id], u = Math.max(0, Math.min(1, (now - r.t0) / 900));
+    r.val = r.from + (r.to - r.from) * (1 - Math.pow(1 - u, 3));
+    const el = document.querySelector(`#hudplayers .hp[data-arg="${id}"] .chip2`);
+    if (el) {
+      el.querySelector('.amt').textContent = Math.round(r.val);
+      el.classList.toggle('up', u > 0 && u < 1 && r.to > r.from); el.classList.toggle('down', u > 0 && u < 1 && r.to < r.from);
+    }
+    if (u >= 1) delete cashRoll[id]; else busy = true;
+  }
+  if (busy) cashTick = requestAnimationFrame(rollCash);
+}
+/* شريط المعاملات تحت لوحة الدور: مَن دفع لمَن وكم */
+function txFeed(flows) {
+  const hud = $('#hud'), pill = $('#hudturn');
+  if (!hud || !flows.length) return;
+  let box = $('#txfeed');
+  if (!box) { box = document.createElement('div'); box.id = 'txfeed'; hud.appendChild(box); }
+  const r = pill.getBoundingClientRect(), h = hud.getBoundingClientRect();
+  box.style.top = `${r.bottom - h.top + 10}px`;
+  const who = w => (w === 'bank' ? '<span class="who bank">🏦 البنك</span>' : `<span class="who" style="--pc:${G.players[w].color}">${G.players[w].icon} ${esc(G.players[w].name)}</span>`);
+  flows.forEach(([from, to, amt]) => {
+    const row = document.createElement('div');
+    row.className = 'tx';
+    row.innerHTML = `${who(from)}<span class="arrow"><b class="coin"></b><b>${amt} ${CUR}</b><i>←</i></span>${who(to)}`;
+    box.appendChild(row);
+    while (box.children.length > 4) box.firstChild.remove();
+    row.animate([{ opacity: 0, transform: 'translateY(-8px) scale(.94)' }, { opacity: 1, transform: 'none', offset: 0.08 }, { opacity: 1, transform: 'none', offset: 0.88 }, { opacity: 0, transform: 'translateY(-6px)' }],
+      { duration: 3600, easing: 'ease-out', fill: 'both' }).onfinish = () => row.remove();
+  });
 }
 
 /* ---------- عقاراتي: يد من بطاقات الملكية (وضع 3D) ----------
@@ -505,6 +667,8 @@ function render() {
   if (G.phase !== 'buy') UI.buyClosed = false;
   renderBoard(); renderPlayers(); renderMine(); renderCenter(); renderLog(); renderModal(); renderStatus();
   if (UI.hud) renderHud();
+  renderBuyBar();
+  coinFx();
   maybeFsPrompt();
   try { sfxSync(); } catch (e) { console.warn(e); }
   if (window.S3D && S3D.on) S3D.sync();
@@ -512,10 +676,12 @@ function render() {
 
 /* ---------- الأحداث ---------- */
 const ACTIONS = {
-  count(n) { UI.count = +n; renderSetup(); },
+  count(n) { UI.count = +n; if (UI.pick >= UI.count) UI.pick = null; renderSetup(); },
+  pickchar(i) { UI.pick = UI.pick === +i ? null : +i; renderSetup(); },
+  setchar(k) { if (UI.pick !== null) UI.chars[UI.pick] = +k; UI.pick = null; renderSetup(); },
   start() {
     const names = [...document.querySelectorAll('.pname')].map((el, i) => el.value.trim() || 'لاعب ' + (i + 1));
-    newGame(names.map((name, i) => ({ name, color: TOKENS[i].color, icon: TOKENS[i].icon })));
+    newGame(names.map((name, i) => ({ name, ...tokenFor(i, UI.chars[i]) })));
     $('#setup').classList.add('hidden'); $('#game').classList.remove('hidden');
     buildBoard(); render();
   },
@@ -523,6 +689,7 @@ const ACTIONS = {
   roll() { dispatch('roll'); },
   buy() { dispatch('buy'); },
   declinebuy() { dispatch('declinebuy'); },
+  passbuy() { dispatch('passbuy'); },
   end() { dispatch('end'); },
   payjail() { dispatch('payjail'); },
   usecard() { dispatch('usecard'); },
@@ -539,6 +706,23 @@ const ACTIONS = {
   },
   pass() { dispatch('pass'); },
   manage() { UI.manage = true; render(); },
+  tradeopen(i) { UI.trade = { give: +i, to: null, take: null, ask: '', add: '', err: '' }; UI.manage = false; UI.deed = null; render(); },
+  tradeclose() { UI.trade = null; render(); },
+  tradeto(pid) { if (UI.trade) { UI.trade.to = +pid; UI.trade.take = null; UI.trade.err = ''; render(); } },
+  tradetake(i) { if (UI.trade) { UI.trade.take = UI.trade.take === +i ? null : +i; UI.trade.err = ''; render(); } },
+  tradesend() {
+    const d = UI.trade; if (!d || d.to === null) return;
+    const ask = Math.max(0, Math.floor(+d.ask || 0)), add = Math.max(0, Math.floor(+d.add || 0));
+    const t = { from: G.cur, to: d.to, give: d.give, take: d.take, cash: ask - add };
+    d.err = tradeErr(t) || '';
+    if (d.err) { render(); return; }
+    UI.trade = null;
+    dispatch('trade', { to: t.to, give: t.give, take: t.take, cash: t.cash });
+    render();
+  },
+  tradeyes() { dispatch('tradeyes'); },
+  tradeno() { dispatch('tradeno'); },
+  tradecancel() { dispatch('tradecancel'); },
   closeManage() { UI.manage = false; render(); },
   build(i) { dispatch('build', +i); },
   sellhouse(i) { dispatch('sellhouse', +i); },
@@ -565,6 +749,12 @@ const ACTIONS = {
   },
 };
 
+// مبالغ نافذة البيع/التبادل تُحفظ أثناء الكتابة حتى لا تضيع عند إعادة الرسم
+document.addEventListener('input', e => {
+  if (!UI.trade) return;
+  if (e.target.id === 'tradeAsk') UI.trade.ask = e.target.value;
+  if (e.target.id === 'tradeAdd') UI.trade.add = e.target.value;
+});
 document.addEventListener('click', e => {
   const t = e.target.closest('[data-act]');
   if (!t || t.disabled) return;
@@ -575,6 +765,33 @@ document.addEventListener('click', e => {
 window.addEventListener('s3dfollow', () => { const b = $('#btnfollow'); if (b) b.classList.toggle('on', !!S3D.follow); });
 
 renderSetup();
+
+/* ---------- سيناريوهات تجربة (محليًا فقط): افتح الصفحة بـ ‎?test=jail أو ‎?test=board ----------
+   تبدأ لعبة بلاعبَين، وبعد لحظة يُرسَل صاحب الدور إلى السجن لتجربة حركة القفص. اضغط J لسجن صاحب الدور مرة أخرى. */
+(function testScenarios() {
+  const test = new URLSearchParams(location.search).get('test');
+  if (test === 'board') {                                    // ‎?test=board: عقارات مملوكة ببيوت وفنادق ورهن، لمعاينة اللوحة
+    window.addEventListener('load', () => {
+      UI.count = 3; renderSetup(); ACTIONS.start();
+      [1, 3, 6, 8, 9, 11, 13, 14, 16, 18, 19, 5, 15, 12, 37, 39].forEach((i, k) => { G.owner[i] = k % 3; });
+      Object.assign(G.houses, { 1: 1, 3: 2, 6: 3, 8: 4, 9: 5, 37: 5, 39: 2 });
+      G.mortgaged[14] = G.mortgaged[15] = true;
+      G.players.forEach(p => { p.played = true; });
+      render();
+    });
+    return;
+  }
+  if (test !== 'jail') return;
+  const jailNow = () => {
+    if (!G.players || G.over || G.rolling || !['roll', 'end'].includes(G.phase)) return;
+    sendToJail(cp()); afterAction();
+  };
+  window.addEventListener('load', () => {
+    UI.count = 2; renderSetup(); ACTIONS.start();
+    setTimeout(jailNow, 3000);                                // مهلة لتحميل النماذج ثلاثية الأبعاد
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'j' || e.key === 'J') jailNow(); });
+})();
 
 /* عدّاد مهلة الدور */
 setInterval(() => {

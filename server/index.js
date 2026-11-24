@@ -19,7 +19,7 @@ const ROOM_TTL_MS = 30 * 60_000;        // غرفة بلا متصلين تُحذ
 const FILES = ['index.html', 'style.css', 'data.js', 'game.js', 'ui.js', 'sfx.js', 'net.js', 'scene3d.js', 'vendor/three.module.js', 'vendor/three.core.js', 'vendor/OrbitControls.js', 'vendor/RoomEnvironment.js', 'vendor/RoundedBoxGeometry.js',
   'vendor/loaders/GLTFLoader.js', 'vendor/utils/BufferGeometryUtils.js', 'vendor/utils/SkeletonUtils.js',
   ...['tree', 'tree-high', 'rocks-low', 'rocks-high', 'stones', 'plant', 'patch-grass', 'patch-dirt', 'tent', 'flag', 'target', 'fence', 'building-structure', 'building-roof'].map(f => `models/scene/${f}.glb`), 'models/scene/Textures/colormap.png',
-  ...['Cat.glb', 'Mouse.glb', 'Bear.glb', 'Rabbit.glb', 'Pig.glb', 'Wolf.glb'].map(f => `models/${f}`)];
+  ...['Cow.glb', 'Cat.glb', 'Mouse.glb', 'Bear.glb', 'Rabbit.glb', 'Pig.glb', 'Wolf.glb', 'Monkey.glb', 'Cheetah.glb', 'Panda.glb', 'Lion.glb'].map(f => `models/${f}`)];
 const TYPES = { '.gltf': 'model/gltf+json', '.glb': 'model/gltf-binary', '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.png': 'image/png' };
 
 const server = http.createServer((req, res) => {
@@ -37,10 +37,10 @@ const server = http.createServer((req, res) => {
 const src = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
 const SRC = { data: src('data.js'), game: src('game.js'), apply: src('server/apply.js') };
 
-const TOKENS = (() => {
+const { TOKENS, CHARS } = (() => {
   const c = vm.createContext({});
   vm.runInContext(SRC.data, c);
-  return JSON.parse(vm.runInContext('JSON.stringify(TOKENS)', c));
+  return JSON.parse(vm.runInContext('JSON.stringify({ TOKENS, CHARS })', c));
 })();
 
 function makeEngine(onChange) {
@@ -57,7 +57,7 @@ function makeEngine(onChange) {
   vm.runInContext(SRC.apply, ctx, { filename: 'apply.js' });
   return {
     snapshot: () => vm.runInContext('snapshot()', ctx),
-    startGame(names) { ctx.__names = names; vm.runInContext('startGame(__names)', ctx); },
+    startGame(names, chars) { ctx.__names = names; ctx.__chars = chars; vm.runInContext('startGame(__names, __chars)', ctx); },
     skip(pid) { ctx.__pid = pid; return vm.runInContext('skipPlayer(__pid)', ctx); },
     apply(pid, m) { ctx.__pid = pid; ctx.__m = m; return vm.runInContext('applyAction(__pid, JSON.parse(__m))', ctx); },
   };
@@ -79,7 +79,7 @@ const send = (ws, o) => { if (ws && ws.readyState === 1) ws.send(typeof o === 's
 function broadcastLobby(room) {
   room.seats.forEach((seat, i) => send(seat.ws, {
     t: 'lobby', code: room.code, you: i,
-    players: room.seats.map((s, j) => ({ name: s.name, icon: TOKENS[j].icon, color: TOKENS[j].color, conn: !!s.ws })),
+    players: room.seats.map((s, j) => ({ name: s.name, char: s.char, icon: CHARS[s.char].icon, color: TOKENS[j].color, conn: !!s.ws })),
   }));
 }
 function broadcastState(room) {
@@ -87,6 +87,8 @@ function broadcastState(room) {
   const conn = JSON.stringify(room.seats.map(s => !!s.ws));
   room.seats.forEach((seat, i) => send(seat.ws, `{"t":"state","you":${i},"conn":${conn},"g":${JSON.stringify(g)}}`));
 }
+// شخصية افتراضية للمقعد الجديد: أول شخصية لم يخترها أحد في الغرفة
+const freeChar = room => { const i = CHARS.findIndex((_, k) => !room.seats.some(s => s.char === k)); return i < 0 ? 0 : i; };
 const refresh = room => (room.started ? broadcastState(room) : broadcastLobby(room));
 
 function attach(ws, room, idx) {
@@ -128,7 +130,7 @@ const handlers = {
     if (!validToken(m.token)) return send(ws, { t: 'err', m: 'هوية غير صالحة' });
     const room = { code: newCode(), seats: [], started: false, engine: null, lastActive: Date.now() };
     rooms.set(room.code, room);
-    room.seats.push({ token: m.token, name: cleanName(m.name, 'لاعب 1'), ws: null });
+    room.seats.push({ token: m.token, name: cleanName(m.name, 'لاعب 1'), char: freeChar(room), ws: null });
     attach(ws, room, 0);
   },
   join(ws, m) {
@@ -140,7 +142,7 @@ const handlers = {
     if (idx < 0) {
       if (room.started) return send(ws, { t: 'err', code: 'started', m: 'اللعبة بدأت بالفعل' });
       if (room.seats.length >= MAX_PLAYERS) return send(ws, { t: 'err', m: 'الغرفة ممتلئة' });
-      idx = room.seats.push({ token: m.token, name: cleanName(m.name, 'لاعب ' + (room.seats.length + 1)), ws: null }) - 1;
+      idx = room.seats.push({ token: m.token, name: cleanName(m.name, 'لاعب ' + (room.seats.length + 1)), char: freeChar(room), ws: null }) - 1;
     }
     attach(ws, room, idx);
   },
@@ -149,9 +151,15 @@ const handlers = {
     if (seatIndex(ws) !== 0) return send(ws, { t: 'err', m: 'المضيف فقط يبدأ اللعبة' });
     if (room.seats.length < MIN_PLAYERS) return send(ws, { t: 'err', m: 'يلزم لاعبان على الأقل' });
     room.engine = makeEngine(() => broadcastState(room));
-    room.engine.startGame(room.seats.map(s => s.name));
+    room.engine.startGame(room.seats.map(s => s.name), room.seats.map(s => s.char));
     room.started = true;
     broadcastState(room);
+  },
+  char(ws, m) {                              // اللاعب يغيّر شخصيته في الردهة
+    const room = ws.room; if (!room || room.started) return;
+    const idx = seatIndex(ws); if (idx < 0 || !Number.isInteger(m.c) || !CHARS[m.c]) return;
+    room.seats[idx].char = m.c;
+    broadcastLobby(room);
   },
   act(ws, m) {
     const room = ws.room; if (!room || !room.started) return;

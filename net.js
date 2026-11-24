@@ -46,6 +46,7 @@ function onMsg(m) {
   if (m.t === 'lobby') {
     setErr('');
     NET.on = true; NET.code = m.code; NET.you = m.you; store.set('aqRoom', m.code);
+    NET.lobby = m;
     renderLobby(m);
     return;
   }
@@ -57,8 +58,8 @@ function renderLobby(m) {
   $('#roomCode').textContent = m.code;
   $('#roomLink').value = `${location.origin}/?room=${m.code}`;
   $('#lobby-players').innerHTML = m.players.map((p, i) =>
-    `<div class="name-row ${p.conn ? '' : 'off'}"><span class="tk" style="background:${p.color}">${p.icon}</span>
-     <b>${esc(p.name)}</b><span class="tag">${i === 0 ? '👑 المضيف' : ''}${i === m.you ? ' (أنت)' : ''}${p.conn ? '' : ' — غير متصل'}</span></div>`).join('');
+    `<div class="name-row ${p.conn ? '' : 'off'}">${i === m.you ? charButton(i, p.color, p.icon) : `<span class="tk" style="background:${p.color}">${p.icon}</span>`}
+     <b>${esc(p.name)}</b><span class="tag">${i === 0 ? '👑 المضيف' : ''}${i === m.you ? ' (أنت) — اضغط الأيقونة لتغيير شخصيتك' : ''}${p.conn ? '' : ' — غير متصل'}</span></div>${i === m.you && NET.pick ? charPicker(p.char) : ''}`).join('');
   const host = m.you === 0;
   const st = document.querySelector('[data-act="startonline"]');
   st.classList.toggle('hidden', !host);
@@ -124,6 +125,15 @@ Object.assign(ACTIONS, {
     if (p && confirm(`إخراج ${p.name} من اللعبة؟ ستعود عقاراته إلى البنك ولا يمكن التراجع.`)) NET.send({ t: 'skip', seat: +id });
   },
   startonline() { NET.send({ t: 'start' }); },
+  // في الردهة يغيّر كل لاعب شخصيته هو فقط؛ خارجها يبقى سلوك شاشة الإعداد المحلية
+  pickchar: (local => i => {
+    if (!NET.on) return local(i);
+    NET.pick = !NET.pick; renderLobby(NET.lobby);
+  })(ACTIONS.pickchar),
+  setchar: (local => k => {
+    if (!NET.on) return local(k);
+    NET.pick = false; NET.send({ t: 'char', c: +k });
+  })(ACTIONS.setchar),
   leave() { leaveRoom(); location.reload(); },
   copylink(_, el) { el.select(); try { navigator.clipboard.writeText(el.value); } catch { /* ignore */ } },
   newgame() { if (NET.on) leaveRoom(); location.reload(); },

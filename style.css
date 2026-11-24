@@ -79,6 +79,14 @@ body {
 .chip.on { background: linear-gradient(180deg, var(--gold-hi), var(--gold-lo)); color: var(--ink-dark); }
 .name-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .name-row .tk { flex: none; width: 36px; height: 36px; font-size: 19px; }
+.tk.pick { padding: 0; cursor: pointer; font-family: inherit; color: inherit; transition: transform .12s; }
+.tk.pick:hover { border-color: var(--gold-hi); transform: scale(1.1); }
+.char-picker { display: flex; gap: 6px; flex-wrap: wrap; margin: -2px 0 12px; padding-inline-start: 46px; }
+.char {
+  font: inherit; font-size: 20px; width: 40px; height: 40px; padding: 0; border-radius: 10px; cursor: pointer;
+  border: 1.5px solid rgba(216, 180, 90, .4); background: rgba(0, 0, 0, .35);
+}
+.char:hover, .char.on { border-color: var(--gold-hi); background: rgba(216, 180, 90, .25); }
 input {
   font: inherit; color: var(--cream); background: rgba(0, 0, 0, .38);
   border: 1.5px solid rgba(216, 180, 90, .4); border-radius: 10px; padding: .5em .8em;
@@ -295,6 +303,15 @@ input::placeholder { color: #8a846f; }
 .prow .bt { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 .prow .st { font-size: .8rem; color: var(--muted); }
 .auc-info { font-size: 1.1rem; line-height: 1.9; }
+/* نافذة البيع / التبادل */
+.box.trade h4 { margin: 14px 0 6px; color: var(--gold); }
+.box.trade .acts { margin-top: 6px; }
+.box.trade .trow { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; }
+.box.trade .trow input { width: 130px; }
+.box.trade .tlabel { margin-top: 10px; }
+.box.trade .terr { min-height: 1.2em; margin: 8px 0 0; color: #ff8a65; font-weight: 700; }
+.tprop { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; }
+.tprop i { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0, 0, 0, .6); flex: none; }
 .bidrow { display: flex; gap: 8px; margin-top: 10px; }
 .bidrow input { flex: 1; min-width: 0; }
 
@@ -362,6 +379,35 @@ body.light {
 #game.is3d #topbar, #game.is3d #leftcol, #game.is3d #rightcol, #game.is3d #stage { display: none; }
 #hud > * { position: absolute; pointer-events: auto; }
 #hud > #banner { pointer-events: none; }
+/* حركة النقود: عملات تطير بين اللاعبين والبنك، والمبلغ يطفو بجانب الرصيد */
+#hudbank { font-size: 1.25rem; line-height: 1; margin-inline-end: 2px; display: inline-block; }
+.coinfx {
+  position: fixed; left: 0; top: 0; z-index: 60; width: 28px; height: 28px; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(circle at 35% 30%, #fff6c2, #f2b134 55%, #c8860f);
+  box-shadow: 0 0 0 2px #8a5a06, inset 0 0 0 4px rgba(255, 246, 194, .55), 0 0 12px 3px rgba(255, 200, 60, .75), 0 3px 6px rgba(0, 0, 0, .45);
+}
+.cashpop {
+  position: fixed; z-index: 61; pointer-events: none; font-weight: 900; font-size: 1.45rem; direction: ltr;
+  padding: 2px 13px; border-radius: 12px; color: #fff; box-shadow: 0 0 0 2px rgba(255, 255, 255, .7), 0 4px 10px rgba(0, 0, 0, .45);
+}
+/* شريط المعاملات: مَن دفع لمَن وكم */
+#hud > #txfeed { left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; z-index: 5; }
+.tx {
+  display: flex; align-items: center; gap: 10px; padding: 6px 14px; border-radius: 16px; white-space: nowrap; font-weight: 800; font-size: 1.05rem;
+  color: #fff; background: rgba(8, 28, 36, .9); box-shadow: 0 0 0 2px var(--gold3, #b8860b), 0 6px 14px rgba(0, 0, 0, .45);
+}
+.tx .who { padding: 1px 10px; border-radius: 10px; background: var(--pc, #33525c); }
+.tx .who.bank { background: #33525c; }
+.tx .arrow { display: inline-flex; align-items: center; gap: 6px; color: #ffd76a; direction: rtl; }
+.tx .arrow i { font-style: normal; font-size: 1.3rem; line-height: 1; }
+.cashpop.up { background: #2e8b57; } .cashpop.down { background: #c0392b; }
+/* أزرار البطاقة المعروضة وسط الشاشة: شراء/تخطٍّ/مزاد أو «حسنًا» (موضعها يضبطه scene3d.js) */
+#hud > #buybar {
+  left: 50%; top: 76%; transform: translate(-50%, 8px); display: flex; gap: 10px; z-index: 5; white-space: nowrap;
+  opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s;
+}
+#hud > #buybar.show { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
+#buybar .btn { font-size: 1.1rem; padding: .6em 1.3em; }
 
 /* اللاعبون (أعلى اليسار) */
 #hudplayers { top: 14px; left: 14px; width: 250px; display: flex; flex-direction: column; gap: 10px; }
@@ -605,11 +651,15 @@ body.light {
 }
 .hp .shield::before { content: ''; position: absolute; inset: 2px; clip-path: inherit; border: 0; background: linear-gradient(160deg, #1b4a5b, #0a2029); z-index: -1; }
 .hp .chip2 {
-  position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%); z-index: 3; white-space: nowrap;
-  display: flex; align-items: center; gap: 4px; padding: 1px 9px 1px 7px; border-radius: 12px; font-weight: 900; font-size: 14px; color: #2b1a04;
-  background: linear-gradient(#fffdf2, #f1e2b4); box-shadow: 0 0 0 2px var(--gold3), 0 3px 6px rgba(0, 0, 0, .4);
+  position: absolute; bottom: -16px; left: 50%; transform: translateX(-50%); z-index: 3; white-space: nowrap;
+  display: flex; align-items: center; gap: 5px; padding: 2px 11px 2px 7px; border-radius: 15px; font-weight: 900; font-size: 20px; line-height: 1.25; color: #2b1a04;
+  background: linear-gradient(#fffdf2, #f1e2b4); box-shadow: 0 0 0 2.5px var(--gold3), 0 4px 8px rgba(0, 0, 0, .45);
+  transition: background .2s, color .2s; direction: ltr;
 }
-.hp .coin { width: 12px; height: 12px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff3b0, var(--gold2)); box-shadow: 0 0 0 1.5px var(--gold3); }
+.hp .chip2 small { font-size: 11px; font-weight: 800; opacity: .7; }
+.hp .chip2.up { background: linear-gradient(#e9ffe9, #9be29b); color: #0d4a1c; }
+.hp .chip2.down { background: linear-gradient(#ffecec, #f3a3a3); color: #7a0f0f; }
+.hp .coin, .tx .coin { width: 17px; height: 17px; border-radius: 50%; flex: none; background: radial-gradient(circle at 35% 30%, #fff3b0, var(--gold2)); box-shadow: 0 0 0 1.5px var(--gold3); }
 .hp .body { position: relative; flex: 1; min-width: 0; margin-inline-start: -10px; padding-top: 4px; display: flex; flex-direction: column; }
 .hp .rib {
   height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 20px 0 28px; color: #fff; font-weight: 800; font-size: 17px;
