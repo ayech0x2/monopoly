@@ -59,7 +59,7 @@ function renderLobby(m) {
   $('#roomLink').value = `${location.origin}/?room=${m.code}`;
   $('#lobby-players').innerHTML = m.players.map((p, i) =>
     `<div class="name-row ${p.conn ? '' : 'off'}">${i === m.you ? charButton(i, p.color, p.icon) : `<span class="tk" style="background:${p.color}">${p.icon}</span>`}
-     <b>${esc(p.name)}</b><span class="tag">${i === 0 ? '👑 المضيف' : ''}${i === m.you ? ' (أنت) — اضغط الأيقونة لتغيير شخصيتك' : ''}${p.conn ? '' : ' — غير متصل'}</span></div>${i === m.you && NET.pick ? charPicker(p.char) : ''}`).join('');
+     <b>${esc(p.name)}</b><span class="tag">${i === 0 ? '👑 المضيف' : ''}${i === m.you ? ' (أنت) — اضغط الأيقونة لتغيير شخصيتك' : ''}${p.conn ? '' : ' — غير متصل'}</span></div>${i === m.you && NET.pick ? charPicker(p.char, p.color, m.players.filter((_, k) => k !== i).map(q => q.color)) : ''}`).join('');
   const host = m.you === 0;
   const st = document.querySelector('[data-act="startonline"]');
   st.classList.toggle('hidden', !host);
@@ -141,6 +141,10 @@ Object.assign(ACTIONS, {
     if (!NET.on) return local(k);
     NET.pick = false; NET.send({ t: 'char', c: +k });
   })(ACTIONS.setchar),
+  setcolor: (local => c => {
+    if (!NET.on) return local(c);
+    NET.send({ t: 'color', c });
+  })(ACTIONS.setcolor),
   leave() { leaveRoom(); location.reload(); },
   copylink(_, el) { el.select(); try { navigator.clipboard.writeText(el.value); } catch { /* ignore */ } },
   newgame() { if (NET.on) leaveRoom(); location.reload(); },

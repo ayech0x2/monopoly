@@ -37,10 +37,10 @@ const server = http.createServer((req, res) => {
 const src = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
 const SRC = { data: src('data.js'), game: src('game.js'), apply: src('server/apply.js') };
 
-const { TOKENS, CHARS } = (() => {
+const { TOKENS, CHARS, PALETTE } = (() => {
   const c = vm.createContext({});
   vm.runInContext(SRC.data, c);
-  return JSON.parse(vm.runInContext('JSON.stringify({ TOKENS, CHARS })', c));
+  return JSON.parse(vm.runInContext('JSON.stringify({ TOKENS, CHARS, PALETTE })', c));
 })();
 
 function makeEngine(onChange) {
@@ -57,7 +57,7 @@ function makeEngine(onChange) {
   vm.runInContext(SRC.apply, ctx, { filename: 'apply.js' });
   return {
     snapshot: () => vm.runInContext('snapshot()', ctx),
-    startGame(names, chars) { ctx.__names = names; ctx.__chars = chars; vm.runInContext('startGame(__names, __chars)', ctx); },
+    startGame(names, chars, colors) { ctx.__names = names; ctx.__chars = chars; ctx.__colors = colors; vm.runInContext('startGame(__names, __chars, __colors)', ctx); },
     skip(pid) { ctx.__pid = pid; return vm.runInContext('skipPlayer(__pid)', ctx); },
     pause(pid, act, conn) { ctx.__pid = pid; ctx.__act = act; ctx.__conn = conn; return vm.runInContext('pauseAction(__pid, __act, __conn)', ctx); },
     pauseRecheck(conn) { ctx.__conn = conn; vm.runInContext('pauseRecheck(__conn)', ctx); },
@@ -81,7 +81,7 @@ const send = (ws, o) => { if (ws && ws.readyState === 1) ws.send(typeof o === 's
 function broadcastLobby(room) {
   room.seats.forEach((seat, i) => send(seat.ws, {
     t: 'lobby', code: room.code, you: i,
-    players: room.seats.map((s, j) => ({ name: s.name, char: s.char, icon: CHARS[s.char].icon, color: TOKENS[j].color, conn: !!s.ws })),
+    players: room.seats.map((s, j) => ({ name: s.name, char: s.char, icon: CHARS[s.char].icon, color: s.color, conn: !!s.ws })),
   }));
 }
 function broadcastState(room) {
@@ -90,6 +90,7 @@ function broadcastState(room) {
   room.seats.forEach((seat, i) => send(seat.ws, `{"t":"state","you":${i},"conn":${conn},"g":${JSON.stringify(g)}}`));
 }
 // شخصية افتراضية للمقعد الجديد: أول شخصية لم يخترها أحد في الغرفة
+const freeColor = room => PALETTE.find(c => !room.seats.some(s => s.color === c)) || PALETTE[0];
 const freeChar = room => { const i = CHARS.findIndex((_, k) => !room.seats.some(s => s.char === k)); return i < 0 ? 0 : i; };
 const refresh = room => (room.started ? broadcastState(room) : broadcastLobby(room));
 
@@ -133,7 +134,7 @@ const handlers = {
     if (!validToken(m.token)) return send(ws, { t: 'err', m: 'هوية غير صالحة' });
     const room = { code: newCode(), seats: [], started: false, engine: null, lastActive: Date.now() };
     rooms.set(room.code, room);
-    room.seats.push({ token: m.token, name: cleanName(m.name, 'لاعب 1'), char: freeChar(room), ws: null });
+    room.seats.push({ token: m.token, name: cleanName(m.name, 'لاعب 1'), char: freeChar(room), color: freeColor(room), ws: null });
     attach(ws, room, 0);
   },
   join(ws, m) {
@@ -145,7 +146,7 @@ const handlers = {
     if (idx < 0) {
       if (room.started) return send(ws, { t: 'err', code: 'started', m: 'اللعبة بدأت بالفعل' });
       if (room.seats.length >= MAX_PLAYERS) return send(ws, { t: 'err', m: 'الغرفة ممتلئة' });
-      idx = room.seats.push({ token: m.token, name: cleanName(m.name, 'لاعب ' + (room.seats.length + 1)), char: freeChar(room), ws: null }) - 1;
+      idx = room.seats.push({ token: m.token, name: cleanName(m.name, 'لاعب ' + (room.seats.length + 1)), char: freeChar(room), color: freeColor(room), ws: null }) - 1;
     }
     attach(ws, room, idx);
   },
@@ -154,7 +155,7 @@ const handlers = {
     if (seatIndex(ws) !== 0) return send(ws, { t: 'err', m: 'المضيف فقط يبدأ اللعبة' });
     if (room.seats.length < MIN_PLAYERS) return send(ws, { t: 'err', m: 'يلزم لاعبان على الأقل' });
     room.engine = makeEngine(() => broadcastState(room));
-    room.engine.startGame(room.seats.map(s => s.name), room.seats.map(s => s.char));
+    room.engine.startGame(room.seats.map(s => s.name), room.seats.map(s => s.char), room.seats.map(s => s.color));
     room.started = true;
     broadcastState(room);
   },
@@ -170,6 +171,13 @@ const handlers = {
     room.lastActive = Date.now();
     const err = room.engine.apply(idx, JSON.stringify(m.m));
     if (err) send(ws, { t: 'err', m: err });
+  },
+  color(ws, m) {                             // اللاعب يغيّر لونه في الردهة (لا يتكرر لون)
+    const room = ws.room; if (!room || room.started) return;
+    const idx = seatIndex(ws); if (idx < 0 || !PALETTE.includes(m.c)) return;
+    if (room.seats.some((s, k) => k !== idx && s.color === m.c)) return send(ws, { t: 'err', m: 'هذا اللون مأخوذ' });
+    room.seats[idx].color = m.c;
+    broadcastLobby(room);
   },
   pause(ws, m) {
     const room = ws.room; if (!room || !room.started) return;

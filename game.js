@@ -28,13 +28,13 @@ function newGame(configs) {
       id: i, name: c.name, color: c.color, icon: c.icon, char: c.char,
       pos: 0, cash: START_CASH, jail: false, jailTurns: 0, jailCards: [], bankrupt: false, played: false,
     })),
-    cur: 0, phase: 'roll', dice: [1, 1], rolling: false, extra: false, doubles: 0,
+    cur: 0, phase: 'order', orderPool: configs.map((_, i) => i), orderRolls: {}, dice: [1, 1], rolling: false, extra: false, doubles: 0,
     owner: Array(40).fill(null), houses: Array(40).fill(0), mortgaged: Array(40).fill(false),
     decks: { chance: shuffle(CHANCE.map((_, i) => i)), chest: shuffle(CHEST.map((_, i) => i)) },
     pot: 0, log: [], debt: null, auction: null, card: null, special: null, trade: null,
     over: false, winner: null, deadline: 0, turnMs: 60000, acted: false, grace: false,
   });
-  log(`بدأت اللعبة! الدور الأول: ${cp().name}`);
+  log('🎲 بدأت اللعبة! كل لاعب يرمي النرد — صاحب أعلى رقم يبدأ.');
   startTurnTimer();
 }
 
@@ -189,6 +189,13 @@ function forfeitPlayer(pid) {
   if (alive.length === 1) {
     G.over = true; G.winner = alive[0]; G.phase = 'over'; G.auction = null; G.debt = null; G.card = null;
     log(`🏆 فاز ${G.winner.name}!`);
+  } else if (G.phase === 'order') {
+    const k = G.orderPool.indexOf(pid);
+    if (k >= 0) {
+      G.orderPool.splice(k, 1); delete G.orderRolls[pid];
+      if (!G.orderPool.length) { G.orderPool = alive.map(p => p.id); G.orderRolls = {}; G.cur = G.orderPool[0]; startTurnTimer(); }
+      else if (G.cur === pid) orderNext(k);
+    }
   } else if (G.cur === pid && !G.auction) {
     G.card = null; G.special = null; G.debt = null;
     endTurn(true);
@@ -274,6 +281,7 @@ function playerActed() {
 function turnTimeout(turn) {
   if (G.over || G.cur !== turn) return;
   if (G.paused) return;
+  if (G.phase === 'order' && !G.rolling) { log(`⏱ ${cp().name} لم يرمِ — رُمي النرد عنه تلقائيًا.`); orderRoll(); return; }
   if (G.rolling || ['moving', 'resolving', 'card', 'auction', 'debt'].includes(G.phase)) {
     turnTimer = setTimeout(() => turnTimeout(turn), 2000); return;
   }
@@ -297,7 +305,36 @@ function graceTimeout(turn) {
   forfeitPlayer(turn);
 }
 
+/* ---------- رمي النرد لتحديد من يبدأ: لا حركة، الأعلى مجموعًا يبدأ، والتعادل يعيد الرمي بين المتعادلين ---------- */
+async function orderRoll() {
+  if (G.phase !== 'order' || G.rolling) return;
+  G.rolling = true; R();
+  if (typeof UI !== 'undefined' && UI.animateDice) await UI.animateDice();
+  if (G.phase !== 'order') { G.rolling = false; return; }
+  const d1 = 1 + Math.floor(Math.random() * 6), d2 = 1 + Math.floor(Math.random() * 6);
+  G.dice = [d1, d2]; G.rolling = false;
+  const p = cp();
+  G.orderRolls[p.id] = d1 + d2;
+  log(`🎲 ${p.name} رمى ${d1} + ${d2} = ${d1 + d2}`);
+  orderNext(G.orderPool.indexOf(p.id) + 1);
+}
+function orderNext(k) {
+  const pool = G.orderPool;
+  if (k < pool.length) { G.cur = pool[k]; startTurnTimer(); R(); return; }
+  const max = Math.max(...pool.map(id => G.orderRolls[id]));
+  const win = pool.filter(id => G.orderRolls[id] === max);
+  if (win.length === 1) {
+    G.cur = win[0]; G.phase = 'roll'; G.orderPool = null; G.orderRolls = {};
+    log(`🏁 ${cp().name} حصل على أعلى رقم (${max}) ويبدأ اللعب!`);
+  } else {
+    log(`⚖️ تعادل (${max}) بين ${win.map(id => G.players[id].name).join(' و ')} — يعيدون الرمي.`);
+    G.orderPool = win; G.orderRolls = {}; G.cur = win[0];
+  }
+  startTurnTimer(); R();
+}
+
 async function doRoll() {
+  if (G.phase === 'order') return orderRoll();
   if (G.phase !== 'roll' || G.rolling) return;
   G.rolling = true; R();
   if (typeof UI !== 'undefined' && UI.animateDice) await UI.animateDice();

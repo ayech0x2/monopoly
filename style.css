@@ -1144,3 +1144,9 @@ button.tcard:hover { transform: translateY(-2px); }
 /* قائمة عقارات الطرف الآخر في التبادل: لا تنضغط البطاقات داخل الشبكة المحدودة الارتفاع */
 .tgrid { grid-auto-rows: max-content; align-content: start; }
 .tgrid .tcard { min-height: 62px; height: auto; flex-shrink: 0; }
+
+/* اختيار اللون */
+.char-picker.colors { margin-top: -6px; }
+.swatch { width: 28px; height: 28px; border-radius: 50%; border: 0; cursor: pointer; box-shadow: 0 0 0 2px rgba(255,255,255,.55), 0 2px 4px rgba(0,0,0,.4); }
+.swatch.on { box-shadow: 0 0 0 3px #fff, 0 0 0 5px #f2b134; transform: scale(1.1); }
+.swatch:disabled { opacity: .25; cursor: not-allowed; }

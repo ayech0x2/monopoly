@@ -11,8 +11,8 @@ function snapshot() {
   return JSON.stringify(G, (k, v) => (k === 'decks' || k === 'cont' || k === 'fast' ? undefined : v));
 }
 
-function startGame(names, chars) {
-  newGame(names.map((name, i) => ({ name, ...tokenFor(i, chars[i]) })));
+function startGame(names, chars, colors) {
+  newGame(names.map((name, i) => ({ name, ...tokenFor(i, chars[i], colors && colors[i]) })));
 }
 
 // يرجع null عند النجاح أو نص الخطأ

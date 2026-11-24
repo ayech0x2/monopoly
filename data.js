@@ -11,6 +11,8 @@ const TOKENS = [
   { color: '#c0392b' }, { color: '#2e7d32' }, { color: '#e67e22' },
   { color: '#1565c0' }, { color: '#6a1b9a' }, { color: '#00838f' },
 ];
+// ألوان يختار منها اللاعب (لا يتكرر لون بين لاعبين)
+const PALETTE = [...TOKENS.map(t => t.color), '#d81b60', '#f9a825', '#546e7a', '#7cb342'];
 // الشخصيات التي يختار منها كل لاعب (النموذج ثلاثي الأبعاد: models/<file>)
 const CHARS = [
   { file: 'Cow.glb', icon: '🐮', name: 'بقرة' }, { file: 'Cat.glb', icon: '🐱', name: 'قطّ' },
@@ -21,9 +23,9 @@ const CHARS = [
   { file: 'Lion.glb', icon: '🦁', name: 'أسد' },
 ];
 // إعداد لاعب في مقعد معيّن بالشخصية المختارة (الافتراضي: شخصية بترتيب المقعد)
-function tokenFor(seat, char) {
+function tokenFor(seat, char, color) {
   const c = CHARS[char] ? char : seat % CHARS.length;
-  return { color: TOKENS[seat].color, char: c, icon: CHARS[c].icon };
+  return { color: PALETTE.includes(color) ? color : TOKENS[seat].color, char: c, icon: CHARS[c].icon };
 }
 
 const GROUPS = {

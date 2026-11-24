@@ -50,17 +50,28 @@ function renderSetup() {
     `<button class="chip ${n === UI.count ? 'on' : ''}" data-act="count" data-arg="${n}">${n}</button>`).join('');
   const old = [...document.querySelectorAll('.pname')].map(i => i.value);
   $('#name-inputs').innerHTML = Array.from({ length: UI.count }, (_, i) => {
-    const t = tokenFor(i, UI.chars[i]);
+    const cols = localColors(), t = tokenFor(i, UI.chars[i], cols[i]);
     return `<div class="name-row">${charButton(i, t.color, t.icon)}
-     <input class="pname" maxlength="14" value="${esc(old[i] || 'لاعب ' + (i + 1))}"></div>${UI.pick === i ? charPicker(t.char) : ''}`;
+     <input class="pname" maxlength="14" value="${esc(old[i] || 'لاعب ' + (i + 1))}"></div>${UI.pick === i ? charPicker(t.char, t.color, cols.filter((_, k) => k !== i)) : ''}`;
   }).join('');
 }
 /* اختيار الشخصية: زرّ الأيقونة يفتح صفّ الشخصيات تحت اللاعب */
 UI.chars = []; UI.pick = null;
 const charButton = (i, color, icon) =>
   `<button class="tk pick" style="background:${color}" data-act="pickchar" data-arg="${i}" title="غيّر الشخصية">${icon}</button>`;
-const charPicker = cur => `<div class="char-picker">${CHARS.map((c, k) =>
-  `<button class="char ${k === cur ? 'on' : ''}" data-act="setchar" data-arg="${k}" title="${c.name}">${c.icon}</button>`).join('')}</div>`;
+const charPicker = (cur, curColor, taken = []) => `<div class="char-picker">${CHARS.map((c, k) =>
+  `<button class="char ${k === cur ? 'on' : ''}" data-act="setchar" data-arg="${k}" title="${c.name}">${c.icon}</button>`).join('')}</div>
+  <div class="char-picker colors">${PALETTE.map(c =>
+  `<button class="swatch ${c === curColor ? 'on' : ''}" style="background:${c}" data-act="setcolor" data-arg="${c}" ${taken.includes(c) ? 'disabled' : ''} title="اللون"></button>`).join('')}</div>`;
+// ألوان اللاعبين محليًا: المختار يُحترم، والبقية تأخذ أول لون حرّ
+UI.colors = [];
+function localColors() {
+  const out = Array(UI.count).fill(null);
+  const used = new Set();
+  for (let i = 0; i < UI.count; i++) if (UI.colors[i] && PALETTE.includes(UI.colors[i]) && !used.has(UI.colors[i])) { out[i] = UI.colors[i]; used.add(out[i]); }
+  for (let i = 0; i < UI.count; i++) if (!out[i]) { out[i] = PALETTE.find(c => !used.has(c)); used.add(out[i]); }
+  return out;
+}
 
 /* ---------- اللوحة ---------- */
 function buildBoard() {
@@ -207,6 +218,10 @@ function renderBuyBar() {
   if (!on) el.classList.remove('show');
 }
 
+function orderInfo() {
+  const rows = (G.orderPool || []).map(id => { const q = G.players[id]; return `<span style="color:${q.color}">${q.icon} ${esc(q.name)}: <b>${G.orderRolls[id] !== undefined ? G.orderRolls[id] : (id === G.cur ? '🎲' : '…')}</b></span>`; }).join(' · ');
+  return `<b>🎲 من يبدأ؟</b> كل لاعب يرمي النرد — الأعلى يبدأ<br>${rows}`;
+}
 function renderCenter() {
   const p = cp(), ph = G.phase;
   const dice = UI.faces || G.dice;
@@ -214,6 +229,8 @@ function renderCenter() {
   if (G.over) {
     info = `🏆 فاز ${esc(G.winner.name)}!`;
     btns = btn('لعبة جديدة', 'newgame', undefined, 'red');
+  } else if (ph === 'order') {
+    info = orderInfo();
   } else if (ph === 'roll') {
     if (p.jail) {
       info = `${esc(p.name)} في السجن (محاولة ${p.jailTurns + 1}/3) — اسحب النرد وارمِه لتحصل على زوج، أو ادفع ${JAIL_FINE} ${CUR}`;
@@ -240,9 +257,9 @@ function renderCenter() {
   }
   if (!G.over && !isMyTurn()) {
     btns = '';
-    info = G.rolling ? '...' : `⏳ دور <b style="color:${p.color}">${esc(p.name)}</b>${UI.conn && UI.conn[p.id] === false ? ' 📴 منقطع' : ''}`;
+    info = G.rolling ? '...' : ph === 'order' ? orderInfo() : `⏳ دور <b style="color:${p.color}">${esc(p.name)}</b>${UI.conn && UI.conn[p.id] === false ? ' 📴 منقطع' : ''}`;
   }
-  if (UI.hud && !G.over && isMyTurn() && ph === 'roll') btns = btn('🎲 ارمِ النرد', 'roll', undefined, '', G.rolling) + btns;
+  if (UI.hud && !G.over && isMyTurn() && (ph === 'roll' || ph === 'order')) btns = btn('🎲 ارمِ النرد', 'roll', undefined, '', G.rolling) + btns;
   if (!UI.hud && !G.over && uiManage()) btns += btn('🏠 ممتلكاتي', 'manage', undefined, 'ghost');
   $('#center').innerHTML = `
     <div class="title">عقارات تونس</div>
@@ -255,7 +272,7 @@ function renderCenter() {
 }
 
 /* ---------- رمي النرد بالسحب ---------- */
-const canThrow = () => !G.over && isMyTurn() && G.phase === 'roll' && !G.rolling && !UI.manage && UI.deed === null;
+const canThrow = () => !G.over && isMyTurn() && (G.phase === 'roll' || G.phase === 'order') && !G.rolling && !UI.manage && UI.deed === null;
 let drag = null;
 document.addEventListener('pointerdown', e => {
   const d = e.target.closest('#dice');
@@ -823,10 +840,11 @@ const ACTIONS = {
   pauseres() { NET.send({ t: 'pause', a: 'resume' }); },
   count(n) { UI.count = +n; if (UI.pick >= UI.count) UI.pick = null; renderSetup(); },
   pickchar(i) { UI.pick = UI.pick === +i ? null : +i; renderSetup(); },
+  setcolor(c) { if (UI.pick !== null && PALETTE.includes(c) && !localColors().some((x, k) => k !== UI.pick && x === c)) { UI.colors[UI.pick] = c; renderSetup(); } },
   setchar(k) { if (UI.pick !== null) UI.chars[UI.pick] = +k; UI.pick = null; renderSetup(); },
   start() {
     const names = [...document.querySelectorAll('.pname')].map((el, i) => el.value.trim() || 'لاعب ' + (i + 1));
-    newGame(names.map((name, i) => ({ name, ...tokenFor(i, UI.chars[i]) })));
+    { const cols = localColors(); newGame(names.map((name, i) => ({ name, ...tokenFor(i, UI.chars[i], cols[i]) }))); }
     $('#setup').classList.add('hidden'); $('#game').classList.remove('hidden');
     buildBoard(); render();
   },
