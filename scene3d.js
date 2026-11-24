@@ -473,14 +473,10 @@ function makePawn(p, idx) {
   const fallback = new THREE.Mesh(pawnGeo, new THREE.MeshPhysicalMaterial({ color: p.color, roughness: 0.22, clearcoat: 1 }));
   fallback.scale.setScalar(0.7); fallback.visible = false; fallback.castShadow = true;     // يظهر فقط إن فشل تحميل النموذج
   const holder = new THREE.Group();
-  const ncv = mkCanvas(320, 72), ng = ncv.getContext('2d');          // بطاقة اسم اللاعب فوق الشخصية
-  ng.fillStyle = 'rgba(255,255,255,.96)'; ng.beginPath(); ng.roundRect(2, 2, 316, 68, 34); ng.fill();
-  ng.fillStyle = p.color; ng.beginPath(); ng.arc(38, 36, 15, 0, Math.PI * 2); ng.fill();
-  ng.direction = 'rtl'; ng.textAlign = 'center'; ng.textBaseline = 'middle'; ng.fillStyle = INK; ng.font = `700 34px ${FONT}`;
-  ng.fillText(p.name, 188, 38, 220);
-  const ntex = new THREE.CanvasTexture(ncv); ntex.colorSpace = THREE.SRGBColorSpace;
+  const ncv = mkCanvas(420, 220);                                    // بطاقة اللاعب فوق الشخصية (تُرسم عند تغيّر الأرقام)
+  const ntex = new THREE.CanvasTexture(ncv); ntex.colorSpace = THREE.SRGBColorSpace; ntex.anisotropy = 4;
   const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: ntex, transparent: true, depthTest: false, depthWrite: false }));
-  tag.scale.set(1.05, 0.24, 1); tag.position.y = 1.0; tag.renderOrder = 10;
+  tag.scale.set(1.2, 0.63, 1); tag.position.y = 1.0; tag.center.set(0.5, 0); tag.renderOrder = 10;
   tag.material.opacity = 0; tag.visible = false;                    // تظهر فقط عند المرور على الشخصية (أو على بطاقة اللاعب)
   const hit = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.21, 0.8, 10), new THREE.MeshBasicMaterial({ visible: false }));
   hit.position.y = 0.4; hit.userData.pawn = idx;                    // هدف غير مرئي لالتقاط المؤشّر (أرخص من فحص النموذج المتحرّك)
@@ -489,7 +485,7 @@ function makePawn(p, idx) {
   halo.rotation.x = -Math.PI / 2; halo.position.y = 0.015;
   grp.add(fallback, holder, tag, halo, hit);
   scene.add(grp);
-  const pw = { grp, holder, halo, tag, hit, fallback, pos: new THREE.Vector3(), target: new THREE.Vector3(), fresh: true,
+  const pw = { grp, holder, halo, tag, ncv, ntex, tagKey: '', hit, fallback, pos: new THREE.Vector3(), target: new THREE.Vector3(), fresh: true,
     speed: 0, lastMove: 0, gait: 'Walk', natSpeed: GAIT_SPEED,
     yaw: 0, rank: 0, tagBase: 1.0, mixer: null, actions: {}, cur: null, once: 0, dead: false, hideAt: 0, prev: null };
   const file = MONSTERS[(p.char ?? idx) % MONSTERS.length];
@@ -534,7 +530,7 @@ function attachModel(pw, gl, file) {
   model.position.y = -box.min.y * k;                               // القدمان على اللوحة
   pw.holder.add(model);
   pw.model = model;
-  pw.tagBase = (box.max.y - box.min.y) * k + 0.3;                  // فوق الأذنين/القرنين
+  pw.tagBase = (box.max.y - box.min.y) * k + 0.1;                  // فوق الأذنين/القرنين
   pw.tag.position.y = pw.tagBase;
   pw.mixer = new THREE.AnimationMixer(model);
   gl.animations.forEach(c => { pw.actions[c.name] = pw.mixer.clipAction(c); });
@@ -593,6 +589,53 @@ function stepCage(pw, dt) {
   if (f >= 1) { scene.remove(c.g); c.mat.dispose(); c.geos.forEach(x => x.dispose()); pw.cage = null; }
 }
 
+/* بطاقة اللاعب: شريط علوي بلون اللاعب فيه الاسم، ثم المال والعقارات والبيوت والفنادق */
+function drawTag(pw, p, id) {
+  let props = 0, houses = 0, hotels = 0;
+  for (let i = 0; i < 40; i++) if (G.owner[i] === id) { props++; if (G.houses[i] === 5) hotels++; else houses += G.houses[i] || 0; }
+  const key = [p.name, p.color, p.cash, props, houses, hotels, p.icon, p.jail ? 1 : 0].join('|');
+  if (pw.tagKey === key) return;
+  pw.tagKey = key;
+  const W = 420, H = 220, BH = 176, g = pw.ncv.getContext('2d');
+  g.clearRect(0, 0, W, H);
+  g.save(); g.shadowColor = 'rgba(0,0,0,.4)'; g.shadowBlur = 14; g.shadowOffsetY = 5;
+  g.beginPath(); g.roundRect(12, 6, W - 24, BH, 28); g.fillStyle = '#16212b'; g.fill(); g.restore();
+  g.save(); g.beginPath(); g.roundRect(12, 6, W - 24, BH, 28); g.clip();
+  const hg = g.createLinearGradient(0, 6, 0, 86); hg.addColorStop(0, p.color); hg.addColorStop(1, 'rgba(0,0,0,.35)');
+  g.fillStyle = p.color; g.fillRect(12, 6, W - 24, 80);
+  g.fillStyle = hg; g.fillRect(12, 6, W - 24, 80);
+  g.fillStyle = 'rgba(255,255,255,.14)'; g.fillRect(12, 6, W - 24, 5);
+  g.restore();
+  g.beginPath(); g.roundRect(12, 6, W - 24, BH, 28); g.lineWidth = 3; g.strokeStyle = 'rgba(255,255,255,.55)'; g.stroke();
+  // شارة الأيقونة (يمين، كالعملة)
+  g.beginPath(); g.arc(W - 62, 46, 34, 0, Math.PI * 2); g.fillStyle = '#fff6df'; g.fill();
+  g.lineWidth = 5; g.strokeStyle = '#e9b94a'; g.stroke();
+  g.font = `40px ${EMOJI}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = INK; g.fillText(p.icon || '', W - 62, 50);
+  // الاسم
+  g.direction = 'rtl'; g.textAlign = 'right'; g.fillStyle = '#fff'; g.font = `800 38px ${FONT}`;
+  g.shadowColor = 'rgba(0,0,0,.45)'; g.shadowBlur = 4;
+  g.fillText(p.name + (p.jail ? ' ⛓' : ''), W - 108, 48, 250); g.shadowBlur = 0;
+  // صفوف الإحصاءات
+  const chip = (x, w, y, fill) => { g.beginPath(); g.roundRect(x, y, w, 40, 20); g.fillStyle = fill; g.fill(); };
+  chip(30, W - 60, 102, 'rgba(255,255,255,.08)');
+  g.textAlign = 'center'; g.fillStyle = '#ffd25e'; g.font = `800 28px ${FONT}`;
+  g.beginPath(); g.arc(W - 62, 122, 14, 0, Math.PI * 2); g.fillStyle = '#f2b134'; g.fill();
+  g.fillStyle = '#5a3d00'; g.font = `800 18px ${FONT}`; g.fillText('د', W - 62, 124);
+  g.direction = 'ltr'; g.textAlign = 'right'; g.fillStyle = '#ffe9a8'; g.font = `800 30px ${FONT}`;
+  g.fillText(String(p.cash), W - 90, 124);
+  g.textAlign = 'left'; g.fillStyle = 'rgba(255,255,255,.55)'; g.font = `600 20px ${FONT}`; g.direction = 'rtl';
+  g.fillText('الرصيد', 46, 124);
+  const stat = (cx, ico, n) => {
+    g.textAlign = 'center'; g.direction = 'ltr'; g.font = `24px ${EMOJI}`; g.fillStyle = '#fff'; g.fillText(ico, cx - 22, 166);
+    g.font = `800 28px ${FONT}`; g.fillText(String(n), cx + 16, 168);
+  };
+  stat(W * 0.2, '🏠', houses); stat(W * 0.5, '🏨', hotels); stat(W * 0.8, '🏘️', props);
+  // مؤشّر سفلي نحو الشخصية
+  g.beginPath(); g.moveTo(W / 2 - 16, BH + 5); g.lineTo(W / 2 + 16, BH + 5); g.lineTo(W / 2, BH + 24); g.closePath();
+  g.fillStyle = '#16212b'; g.fill();
+  pw.ntex.needsUpdate = true;
+}
+
 function updatePawn(pw, id, ms, dt) {
   const p = G.players[id];
   // حركة بسرعة ثابتة: تصل الشخصية إلى البلاطة في MOVE_STEP_MS تقريبًا (pw.speed يُحسب عند تغيّر الوجهة)
@@ -634,8 +677,12 @@ function updatePawn(pw, id, ms, dt) {
   const hov = S.hoverPawn === id && !p.bankrupt;
   const named = (hov || hoverTag === id) && pw.grp.visible;         // بطاقة الاسم: تظهر وتختفي بتلاشٍ ناعم
   const tm = pw.tag.material;
+  if (named || tm.opacity > 0.02) drawTag(pw, p, id);
   tm.opacity += ((named ? 1 : 0) - tm.opacity) * (1 - Math.exp(-dt * 14));
   pw.tag.visible = tm.opacity > 0.02;
+  // حجم ثابت تقريبًا على الشاشة: يكبر مع الابتعاد بالكاميرا (قياسًا على مسافة مرجعية) فيبقى مقروءًا عند التصغير
+  const tk = THREE.MathUtils.clamp(camera.position.distanceTo(pw.grp.position) / 12, 0.55, 3.2);
+  pw.tag.scale.set(1.2 * tk, 0.63 * tk, 1);
   // الحلقة بلون اللاعب: تظهر فقط عند المرور على الشخصية (أو بطاقة لاعبها) أو أثناء حركتها
   const ring = !p.bankrupt && (named || moving) ? 0.9 : 0, hm = pw.halo.material;
   hm.opacity += (ring - hm.opacity) * (1 - Math.exp(-dt * (ring ? 14 : 5)));

@@ -56,15 +56,18 @@
         <button class="tb" id="hudcards" data-act="manage" title="أوراقي"><i>🏠</i></button>
         <button class="tb on" id="btnfollow" data-act="followtoggle" title="الكاميرا تتبع اللاعب"><i>🎯</i></button>
         <button class="tb" data-act="resetview" title="عرض اللوحة كاملة"><i>🎥</i></button>
+        <button class="tb hidden" id="btnpause" data-act="pausereq" title="طلب إيقاف مؤقت"><i>⏸</i></button>
         <button class="tb" data-act="mute" id="btnmute" title="الصوت"><i>🔊</i></button>
         <button class="tb" data-act="fullscreen" title="ملء الشاشة"><i>⛶</i></button>
         <button class="tb danger" data-act="leavegame" title="انسحاب"><i>✖</i></button>
       </nav>
       <span id="hudnet"></span>
+      <div id="hudclock"><span class="clk" id="clk" title="مدة اللعبة">0:00</span><span class="clk" id="tleft" title="الوقت المتبقي للدور"></span></div>
       <aside id="hudside">
                 <div class="panel"><h4>السجل</h4><div id="hudlog"></div></div>
       </aside>
       <div id="hudhand"></div>
+      <div id="hudpause"></div>
       <div id="hudwrap"><section id="hudturn"></section></div>
       <div id="buybar"></div>
       <div id="banner"></div>

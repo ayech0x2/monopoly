@@ -1024,3 +1024,113 @@ button.tcard:hover { transform: translateY(-2px); }
 #hudwrap .turnpill .tx small { font-size: .78rem; line-height: 1.3; }
 #hudwrap .turnpill .clk { flex: none; width: auto; min-width: 48px; padding: 3px 8px; font-size: .85rem; }
 #hudwrap .turnpill #hudbank { flex: none; font-size: 1.4rem; }
+
+/* ---- الساعتان (مدة اللعبة + مهلة الدور): أعلى منتصف الشاشة، كبيرتان وواضحتان ---- */
+#hud > #hudclock { top: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px; z-index: 6; direction: ltr; }
+#hudclock .clk {
+  min-width: 78px; text-align: center; box-sizing: border-box; font-variant-numeric: tabular-nums; font-weight: 800; font-size: 1.35rem; line-height: 1;
+  padding: 9px 18px; border-radius: 22px; color: var(--gold1); background: linear-gradient(180deg, rgba(20, 65, 79, .96), rgba(10, 32, 41, .96));
+  box-shadow: 0 0 0 2.5px var(--gold2), 0 6px 14px rgba(0, 0, 0, .45); text-shadow: 0 1px 2px #000;
+}
+#hudclock .clk:empty { display: none; }
+#hudclock .clk.low { color: #fff; background: linear-gradient(180deg, #d9473a, #8e1f16); animation: lowpulse .6s ease-in-out infinite alternate; }
+
+/* أزرار شريط الشراء/البطاقة: بنفس لون أزرار الواجهة الذهبية */
+#buybar .btn, #buybar .btn.green {
+  font-family: inherit; font-weight: 900; color: #3a2406; border: 0; border-radius: 14px; cursor: pointer;
+  background: linear-gradient(180deg, #fbe39a, var(--gold1) 30%, var(--gold2)); text-shadow: 0 1px 0 rgba(255, 255, 255, .5);
+  box-shadow: 0 0 0 2.5px var(--gold3), inset 0 2px 0 rgba(255, 255, 255, .7), 0 5px 0 #4a2c06, 0 9px 14px rgba(0, 0, 0, .4);
+  transition: transform .1s, filter .1s;
+}
+#buybar .btn:hover:not(:disabled) { filter: brightness(1.1) saturate(1.1); transform: translateY(-2px); }
+#buybar .btn:active:not(:disabled) { transform: translateY(3px); box-shadow: 0 0 0 2.5px var(--gold3), 0 2px 0 #4a2c06; }
+#buybar .btn.ghost { color: var(--gold1); text-shadow: none; background: rgba(0, 0, 0, .4); box-shadow: 0 0 0 2px var(--gold3), 0 4px 0 #06161c; }
+
+/* الساعتان: أعلى اليسار */
+#hud > #hudclock { left: 14px; top: 14px; transform: none; }
+#hud > #hudplayers { left: 200px; }
+
+/* ---- نافذة اللاعب (عند النقر على بطاقته) ---- */
+.box.pview { max-width: 420px; width: min(420px, 92vw); padding: 0 0 14px; overflow: hidden auto; }
+.pv-head { display: flex; align-items: center; gap: 14px; padding: 16px 18px; background: linear-gradient(135deg, var(--pc), rgba(0, 0, 0, .35)); border-bottom: 2px solid var(--gold2); }
+.pv-face { flex: none; width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; font-size: 2.2rem; background: radial-gradient(circle at 35% 30%, #fff6c2, #f2b134 60%, #c8860f); box-shadow: 0 0 0 3px #0d2a33, 0 0 0 5px var(--gold1), 0 4px 10px rgba(0, 0, 0, .5); }
+.pv-name { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.pv-name b { font-size: 1.4rem; color: #fff; text-shadow: 0 2px 3px rgba(0, 0, 0, .6); }
+.pv-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.pv-tags .t { font-style: normal; font-size: .75rem; font-weight: 800; padding: 2px 9px; border-radius: 10px; background: rgba(0, 0, 0, .4); color: var(--cream2); box-shadow: inset 0 0 0 1px rgba(246, 210, 122, .5); }
+.pv-tags .t.now { background: var(--gold1); color: #3a2406; } .pv-tags .t.bad { background: #b3382c; color: #fff; } .pv-tags .t.me { color: var(--gold1); }
+.pv-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 14px 16px 6px; }
+.pv-stats > div { display: flex; flex-direction: column; gap: 3px; padding: 9px 12px; border-radius: 12px; background: rgba(0, 0, 0, .3); box-shadow: inset 0 0 0 1.5px rgba(246, 210, 122, .35); }
+.pv-stats small { color: #a9cbd3; font-size: .75rem; font-weight: 700; }
+.pv-stats b { color: var(--gold1); font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.pv-stats .tot { grid-column: 1 / -1; align-items: center; background: linear-gradient(180deg, rgba(246, 210, 122, .22), rgba(0, 0, 0, .3)); }
+.pv-stats .tot b { font-size: 1.5rem; }
+.pv-list { padding: 8px 16px 4px; max-height: 38vh; overflow: auto; }
+.pv-list .none { text-align: center; padding: 18px 0; font-size: 1rem; }
+.box.pview .acts { padding: 6px 16px 0; display: flex; justify-content: center; }
+.box.pview .acts .btn { min-width: 140px; }
+
+/* العملة داخل القطعة الذهبية بدل الحرف الصغير بعد الرقم */
+.hp .chip2 small { display: none; }
+.hp .chip2 .coin { width: 26px; height: 26px; display: grid; place-items: center; font-style: normal; font-weight: 900; font-size: 17px; line-height: 1; color: #4a2c06; text-shadow: 0 1px 0 rgba(255, 255, 255, .5); box-shadow: 0 0 0 2px var(--gold3), inset 0 -2px 3px rgba(0, 0, 0, .2); }
+.hp .chip2 .coin::after { content: 'د'; }
+.hp .chip2 { padding-inline-end: 12px; }
+
+/* ---- بطاقات اللاعبين: نسخة مضغوطة ---- */
+#hudplayers { top: 20px; gap: 14px; }
+.hp { flex-basis: 214px; }
+.hp .portrait { width: 60px; height: 60px; border-radius: 14px; border-width: 3px; box-shadow: 0 0 0 2.5px var(--gold2), 0 0 0 4px var(--gold3), 0 6px 10px rgba(0, 0, 0, .45), inset 0 -8px 14px rgba(0, 0, 0, .25); }
+.hp .face { font-size: 34px; }
+.hp .shield { top: -9px; left: -9px; width: 24px; height: 27px; font-size: 12px; }
+.hp .body { margin-inline-start: -8px; padding-top: 3px; }
+.hp .rib { height: 26px; font-size: 14px; padding: 0 16px 0 22px; clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 12px 50%); }
+.hp .rib small { font-size: 10px; }
+.hp .plate { height: 28px; font-size: 13px; gap: 10px; padding: 0 16px 0 10px; }
+.hp .plate .st { height: 18px; } .hp .plate .st svg { width: 15px; height: 15px; } .hp .plate .st b { line-height: 18px; }
+.hp .chip2 { bottom: -13px; font-size: 15px; padding: 1px 9px 1px 4px; gap: 4px; box-shadow: 0 0 0 2px var(--gold3), 0 3px 6px rgba(0, 0, 0, .45); }
+.hp .chip2 .coin { width: 20px; height: 20px; font-size: 13px; box-shadow: 0 0 0 1.5px var(--gold3), inset 0 -2px 3px rgba(0, 0, 0, .2); }
+.hp .ptr { left: 30px; top: -14px; border-left-width: 9px; border-right-width: 9px; border-top-width: 12px; }
+.hp .tbar { bottom: -7px; height: 4px; }
+
+/* ---- الإيقاف المؤقت ---- */
+#hud > #hudpause { top: 90px; left: 50%; transform: translateX(-50%); z-index: 40; display: none; pointer-events: none; }
+#hudpause.show { display: block; }
+#hudpause .pz {
+  pointer-events: auto; min-width: 300px; max-width: 90vw; padding: 14px 22px; border-radius: 20px; text-align: center; color: var(--cream2); direction: rtl;
+  background: linear-gradient(180deg, rgba(20, 65, 79, .97), rgba(10, 32, 41, .97)); box-shadow: 0 0 0 3px var(--gold2), 0 12px 28px rgba(0, 0, 0, .55);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+#hudpause .pz b { font-size: 1.15rem; color: var(--gold1); } #hudpause .pz small { color: #a9cbd3; font-size: .9rem; }
+#hudpause .pzb { display: flex; gap: 10px; margin-top: 6px; }
+#hudpause .pz.ask { animation: pzpop .5s ease-out; }
+@keyframes pzpop { from { transform: scale(.85); opacity: 0; } }
+#hud > #hudpause:has(.big) { top: 0; left: 0; right: 0; bottom: 0; transform: none; display: grid; place-items: center; background: rgba(5, 14, 18, .6); backdrop-filter: blur(3px); pointer-events: auto; }
+#hudpause .pz.big { padding: 26px 40px; gap: 10px; } #hudpause .pz.big .pzi { font-size: 3rem; line-height: 1; } #hudpause .pz.big b { font-size: 1.6rem; }
+#hud > #hudclock { z-index: 41; }
+#hudpause .btn { font-size: 1rem; }
+
+/* ===== صك الملكية — تصميم جديد ===== */
+.deed .dhead { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; text-align: right;
+  background: linear-gradient(135deg, var(--dc), color-mix(in srgb, var(--dc) 60%, #000)); color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 4px 12px rgba(0,0,0,.35); text-shadow: 0 1px 3px rgba(0,0,0,.6); }
+.deed .dhead .dic { font-size: 2rem; width: 52px; height: 52px; display: grid; place-items: center; border-radius: 50%; background: rgba(0,0,0,.28); box-shadow: inset 0 0 0 2px rgba(255,255,255,.3); }
+.deed .dhead small { display: block; opacity: .85; font-size: .8rem; }
+.deed .dhead b { font-size: 1.5rem; line-height: 1.2; }
+.deed .dmeta { display: flex; justify-content: space-between; align-items: center; margin: 12px 2px 8px; }
+.deed .dprice { font-weight: 800; font-size: 1.3rem; color: var(--gold1, #f2b134); }
+.deed .dbadge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 99px; font-size: .9rem; background: rgba(0,0,0,.3); box-shadow: 0 0 0 1px rgba(246,210,122,.4); }
+.deed .dbadge i { width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 0 2px rgba(255,255,255,.6); }
+.deed .dbadge.free { color: #9fe0b4; }
+.deed .drows { display: flex; flex-direction: column; gap: 5px; }
+.deed .drow { position: relative; display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-radius: 10px; background: rgba(255,255,255,.06); }
+.deed .drow:nth-child(even) { background: rgba(255,255,255,.03); }
+.deed .drow .dl { display: flex; align-items: center; gap: 8px; }
+.deed .drow .dl i { font-style: normal; font-size: 1rem; opacity: .9; }
+.deed .drow .dv { font-weight: 800; color: var(--gold1, #f2b134); font-variant-numeric: tabular-nums; }
+.deed .drow.on { background: linear-gradient(90deg, rgba(242,177,52,.35), rgba(242,177,52,.12)); box-shadow: 0 0 0 2px var(--gold1, #f2b134); }
+.deed .drow em { position: absolute; top: -8px; left: 10px; font-style: normal; font-size: .65rem; font-weight: 800; padding: 1px 8px; border-radius: 99px; background: var(--gold1, #f2b134); color: #3a2406; }
+.deed .dfoot { display: flex; gap: 8px; margin-top: 10px; }
+.deed .dfoot > div { flex: 1; padding: 8px; border-radius: 10px; background: rgba(0,0,0,.28); border: 1px dashed rgba(246,210,122,.35); }
+.deed .dfoot small { display: block; opacity: .75; font-size: .75rem; }
+.deed .dfoot b { color: var(--gold1, #f2b134); }
+.deed .acts { margin-top: 14px; }

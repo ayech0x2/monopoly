@@ -19,6 +19,7 @@ function startGame(names, chars) {
 function applyAction(pid, m) {
   if (!G.players) return 'اللعبة لم تبدأ';
   if (G.over) return 'انتهت اللعبة';
+  if (G.paused) return 'اللعبة متوقفة مؤقتًا';
   if (!m || typeof m.t !== 'string') return 'طلب غير صالح';
   const T = m.t, a = m.a;
 
@@ -81,4 +82,53 @@ function skipPlayer(pid) {
   if (G.trade && (G.trade.from === pid || G.trade.to === pid)) G.trade = null;
   forfeitPlayer(pid);
   return null;
+}
+
+/* ---------- الإيقاف المؤقت بالتراضي ----------
+   G.pause = { by, acks } أثناء الطلب؛ G.paused = true بعد موافقة كل اللاعبين المتصلين الآخرين.
+   conn: مصفوفة اتصال المقاعد (الخادم يعرفها لا المحرك). */
+let pauseTimer = null;
+const PAUSE_REQ_MS = 20000;
+function pauseCheck(conn) {
+  if (!G.pause || G.paused) return;
+  const need = G.players.filter(p => p.id !== G.pause.by && !p.bankrupt && conn[p.id]).map(p => p.id);
+  if (need.every(id => G.pause.acks.includes(id))) {
+    clearTimeout(pauseTimer);
+    pauseGame();
+    log(`⏸ توقّفت اللعبة مؤقتًا (بطلب ${G.players[G.pause.by].name}).`);
+  }
+}
+function pauseRecheck(conn) { if (G.players && G.pause && !G.paused) { pauseCheck(conn); R(); } }
+function pauseAction(pid, act, conn) {
+  if (!G.players || G.over) return 'انتهت اللعبة';
+  const me = G.players[pid];
+  if (!me || me.bankrupt) return 'غير مسموح';
+  if (act === 'request') {
+    if (G.paused) return 'اللعبة متوقفة بالفعل';
+    if (G.pause) return 'هناك طلب إيقاف قائم';
+    G.pause = { by: pid, acks: [] };
+    log(`⏸ ${me.name} يطلب إيقاف اللعبة مؤقتًا.`);
+    clearTimeout(pauseTimer);
+    pauseTimer = setTimeout(() => { if (G.pause && !G.paused) { G.pause = null; log('⏸ انتهت مهلة طلب الإيقاف.'); R(); } }, PAUSE_REQ_MS);
+    G.pause.until = Date.now() + PAUSE_REQ_MS;
+    pauseCheck(conn); R(); return null;
+  }
+  if (act === 'resume') {
+    if (!G.paused) return 'اللعبة غير متوقفة';
+    G.pause = null; resumeGame(); log(`▶️ ${me.name} استأنف اللعبة.`); R(); return null;
+  }
+  if (!G.pause || G.paused) return 'لا يوجد طلب إيقاف';
+  if (act === 'cancel') {
+    if (G.pause.by !== pid) return 'غير مسموح';
+    clearTimeout(pauseTimer); G.pause = null; log(`${me.name} ألغى طلب الإيقاف.`); R(); return null;
+  }
+  if (pid === G.pause.by) return 'أنت صاحب الطلب';
+  if (act === 'accept') {
+    if (!G.pause.acks.includes(pid)) G.pause.acks.push(pid);
+    pauseCheck(conn); R(); return null;
+  }
+  if (act === 'decline') {
+    clearTimeout(pauseTimer); G.pause = null; log(`⏸ ${me.name} رفض طلب الإيقاف.`); R(); return null;
+  }
+  return 'طلب غير صالح';
 }

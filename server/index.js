@@ -59,6 +59,8 @@ function makeEngine(onChange) {
     snapshot: () => vm.runInContext('snapshot()', ctx),
     startGame(names, chars) { ctx.__names = names; ctx.__chars = chars; vm.runInContext('startGame(__names, __chars)', ctx); },
     skip(pid) { ctx.__pid = pid; return vm.runInContext('skipPlayer(__pid)', ctx); },
+    pause(pid, act, conn) { ctx.__pid = pid; ctx.__act = act; ctx.__conn = conn; return vm.runInContext('pauseAction(__pid, __act, __conn)', ctx); },
+    pauseRecheck(conn) { ctx.__conn = conn; vm.runInContext('pauseRecheck(__conn)', ctx); },
     apply(pid, m) { ctx.__pid = pid; ctx.__m = m; return vm.runInContext('applyAction(__pid, JSON.parse(__m))', ctx); },
   };
 }
@@ -109,6 +111,7 @@ function detach(ws) {
   if (idx < 0 || room.seats[idx].ws !== ws) return;
   const seat = room.seats[idx];
   seat.ws = null; room.lastActive = Date.now();
+  if (room.started && room.engine) room.engine.pauseRecheck(room.seats.map(s => !!s.ws));   // غياب لاعب لا يعطّل طلب إيقاف قائم
   if (!room.started) {
     seat.grace = setTimeout(() => removeSeat(room, seat.token), LOBBY_GRACE_MS);
   }
@@ -166,6 +169,13 @@ const handlers = {
     const idx = seatIndex(ws); if (idx < 0) return;
     room.lastActive = Date.now();
     const err = room.engine.apply(idx, JSON.stringify(m.m));
+    if (err) send(ws, { t: 'err', m: err });
+  },
+  pause(ws, m) {
+    const room = ws.room; if (!room || !room.started) return;
+    const idx = seatIndex(ws); if (idx < 0 || !['request', 'accept', 'decline', 'cancel', 'resume'].includes(m.a)) return;
+    room.lastActive = Date.now();
+    const err = room.engine.pause(idx, m.a, room.seats.map(s => !!s.ws));
     if (err) send(ws, { t: 'err', m: err });
   },
   skip(ws, m) {

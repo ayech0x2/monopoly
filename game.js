@@ -212,7 +212,8 @@ function afterAction() {
     if (!G.owner.includes(p.id)) {
       if (G.fast) { endTurn(); return; }
       const turn = G.cur;
-      setTimeout(() => { if (!G.over && G.cur === turn && G.phase === 'end') endTurn(); }, AUTO_END_MS);
+      const autoEnd = () => { if (G.over || G.cur !== turn || G.phase !== 'end') return; if (G.paused) setTimeout(autoEnd, AUTO_END_MS); else endTurn(); };
+      setTimeout(autoEnd, AUTO_END_MS);
     }
   }
   R();
@@ -234,9 +235,9 @@ function endTurn(force) {
    20 ثانية لكل دور. إن لم يلعب اللاعب أي فعل خلالها تُفتح له مهلة أخيرة مدتها دقيقة؛ فإن انتهت دون لعب يُطرد.
    وإن كان قد لعب (رمى مثلًا) ولم يُنهِ دوره، ينتهي دوره تلقائيًا عند انتهاء المهلة. */
 const TURN_MS = 20000, GRACE_MS = 60000;
-let turnTimer = null;
+let turnTimer = null, turnFn = null, pausedLeft = 0;
 function armTurnTimer(ms, fn) {
-  clearTimeout(turnTimer);
+  clearTimeout(turnTimer); turnFn = fn;
   G.deadline = Date.now() + ms; G.turnMs = ms;
   const turn = G.cur;
   turnTimer = setTimeout(() => fn(turn), ms);
@@ -244,6 +245,20 @@ function armTurnTimer(ms, fn) {
 function startTurnTimer() {
   G.acted = false; G.grace = false;
   armTurnTimer(TURN_MS, turnTimeout);
+}
+// إيقاف مؤقت: يُجمَّد عدّاد الدور ويُستأنف بما تبقّى منه
+function pauseGame() {
+  if (G.paused) return;
+  pausedLeft = Math.max(0, G.deadline - Date.now());
+  clearTimeout(turnTimer); turnTimer = null;
+  G.paused = true; G.pauseLeft = pausedLeft;
+}
+function resumeGame() {
+  if (!G.paused) return;
+  G.paused = false; G.pauseLeft = 0;
+  G.deadline = Date.now() + pausedLeft;
+  const turn = G.cur, fn = turnFn;
+  if (fn && !G.over) turnTimer = setTimeout(() => fn(turn), pausedLeft);
 }
 // يُستدعى عند أي فعل من صاحب الدور
 function playerActed() {

@@ -140,7 +140,7 @@ function renderPlayers() {
 const viewerId = () => (UI.viewer !== null ? UI.viewer : G.cur);
 
 function renderMine() { $('#mine').innerHTML = holdingsHTML(viewerId()); }
-function holdingsHTML(pid) {
+function holdingsHTML(pid, rich) {
   const p = G.players[pid];
   const owned = SPACES.map((s, i) => i).filter(i => G.owner[i] === pid);
   const propVal = owned.reduce((n, i) => n + (G.mortgaged[i] ? SPACES[i].price / 2 : SPACES[i].price) +
@@ -165,6 +165,19 @@ function holdingsHTML(pid) {
     return `<div class="rset" style="border-color:${g.color}">
       <div class="rh" style="background:${g.color}"><span>${g.name}</span><span>${mine.length}/${g.all.length}${full ? ' ★' : ''}</span></div>${cards}</div>`;
   }).join('');
+  if (rich) {
+    const bld = owned.reduce((k, i) => k + (SPACES[i].type === 'prop' ? G.houses[i] : 0), 0);
+    const tags = [p.id === G.cur && !G.over ? '<em class="t now">دوره الآن</em>' : '', p.bankrupt ? '<em class="t bad">مفلس</em>' : '', p.jail ? '<em class="t bad">في السجن</em>' : '',
+      p.jailCards.length ? `<em class="t">🔑 ×${p.jailCards.length}</em>` : '', p.id === viewerId() ? '<em class="t me">أنت</em>' : ''].join('');
+    return `<div class="pv-head" style="--pc:${p.color}"><span class="pv-face">${p.icon}</span>
+        <span class="pv-name"><b>${esc(p.name)}</b><span class="pv-tags">${tags}</span></span></div>
+      <div class="pv-stats">
+        <div><small>النقد</small><b>💰 ${p.cash}</b></div>
+        <div><small>العقارات</small><b>🏠 ${owned.length}${bld ? ` · ${bld}🏗️` : ''}</b></div>
+        <div class="tot"><small>الثروة الكلية</small><b>${p.cash + propVal} ${CUR}</b></div>
+      </div>
+      <div class="pv-list">${groups || '<p class="none">لا يملك أي عقار بعد.</p>'}</div>`;
+  }
   return `<div class="mh"><b>🏠 عقارات ${esc(p.name)}</b>
       <span>${owned.length} عقار</span></div>
     <div class="mstat"><span>💰 ${p.cash}</span><span>🏘️ ${propVal}</span><span>= ${p.cash + propVal} ${CUR}</span></div>
@@ -289,26 +302,36 @@ UI.animateDice = async () => {
 const ribbon = t => `<div class="ribbon">${t}</div>`;
 
 function deedHTML(i) {
-  const s = SPACES[i], o = G.owner[i];
-  const ownerTxt = o === null ? 'غير مملوك' : `المالك: ${esc(G.players[o].name)}${G.mortgaged[i] ? ' (مرهون)' : ''}`;
-  let head = `<div class="head" style="background:${s.group ? GROUPS[s.group].color : '#ddd'}">${esc(s.name)}</div>`;
+  const s = SPACES[i], o = G.owner[i], mort = !!G.mortgaged[i];
+  const col = s.group ? GROUPS[s.group].color : '#c9a24a';
+  const icon = s.type === 'station' ? '🚆' : s.type === 'util' ? '💡' : s.type === 'prop' ? '🏠' : '★';
+  const kind = s.type === 'station' ? 'محطة' : s.type === 'util' ? 'شركة خدمات' : s.type === 'prop' ? 'عقار' : '';
+  const cur = G.houses[i] || 0, cnt = o !== null ? ownedCount(s.type, o) : 0;
+  const row = (a, b, on, ic) => `<div class="drow${on ? ' on' : ''}"><span class="dl">${ic ? `<i>${ic}</i>` : ''}${a}</span><span class="dv">${b}</span>${on ? '<em>الحالي</em>' : ''}</div>`;
   let rows = '';
-  const row = (a, b) => `<tr><td>${a}</td><td>${b}</td></tr>`;
   if (s.type === 'prop') {
-    rows = row('الإيجار', s.rent[0] + ' ' + CUR) + row('بمجموعة كاملة', s.rent[0] * 2 + ' ' + CUR) +
-      [1, 2, 3, 4].map(n => row(`مع ${n} ${n === 1 ? 'بيت' : 'بيوت'}`, s.rent[n] + ' ' + CUR)).join('') +
-      row('مع فندق', s.rent[5] + ' ' + CUR) + row('سعر البيت / الفندق', houseCost(i) + ' ' + CUR) +
-      row('قيمة الرهن', s.price / 2 + ' ' + CUR);
+    const full = o !== null && hasMonopoly(s.group, o);
+    rows = row('الإيجار', s.rent[0] + ' ' + CUR, o !== null && cur === 0 && !full, '🏷️') +
+      row('بمجموعة كاملة', s.rent[0] * 2 + ' ' + CUR, o !== null && cur === 0 && full, '🔗') +
+      [1, 2, 3, 4].map(n => row(`مع ${n} ${n === 1 ? 'بيت' : 'بيوت'}`, s.rent[n] + ' ' + CUR, cur === n, '🏠')).join('') +
+      row('مع فندق', s.rent[5] + ' ' + CUR, cur === 5, '🏨');
   } else if (s.type === 'station') {
-    rows = row('محطة واحدة', '25') + row('محطتان', '50') + row('3 محطات', '100') + row('4 محطات', '200') + row('قيمة الرهن', s.price / 2 + ' ' + CUR);
+    rows = [[1, 'محطة واحدة', 25], [2, 'محطتان', 50], [3, '3 محطات', 100], [4, '4 محطات', 200]].map(([n, t, v]) => row(t, v + ' ' + CUR, cnt === n, '🚆')).join('');
   } else if (s.type === 'util') {
-    rows = row('شركة واحدة', '4 × النرد') + row('الشركتان', '10 × النرد') + row('قيمة الرهن', s.price / 2 + ' ' + CUR);
-  } else {
-    rows = row('', esc(s.name));
+    rows = row('شركة واحدة', '4 × النرد', cnt === 1, '🎲') + row('الشركتان', '10 × النرد', cnt === 2, '🎲');
   }
-  const price = s.price ? `<p>السعر: <b>${s.price} ${CUR}</b> — ${ownerTxt}</p>` : '';
+  const foot = [];
+  if (s.type === 'prop') foot.push(['سعر البيت / الفندق', houseCost(i) + ' ' + CUR]);
+  if (s.price) foot.push(['قيمة الرهن', s.price / 2 + ' ' + CUR]);
+  const status = o === null ? '<span class="dbadge free">غير مملوك</span>'
+    : `<span class="dbadge own"><i style="background:${G.players[o].color}"></i>${esc(G.players[o].name)}${mort ? ' · مرهون' : ''}</span>`;
   const sell = o !== null && o === viewerId() && uiManage() && !G.trade && !tradableErr(i, o) ? btn('بيع / تبادل', 'tradeopen', i, 'green') : '';
-  return `<div class="box deed">${ribbon('صك الملكية')}${head}${price}<table>${rows}</table><div class="acts">${sell}<button class="btn" data-act="closeDeed">إغلاق</button></div></div>`;
+  return `<div class="box deed">${ribbon('صك الملكية')}
+    <div class="dhead" style="--dc:${col}"><span class="dic">${icon}</span><div><small>${kind}</small><b>${esc(s.name)}</b></div></div>
+    ${s.price ? `<div class="dmeta"><span class="dprice">${s.price} ${CUR}</span>${status}</div>` : ''}
+    <div class="drows">${rows}</div>
+    ${foot.length ? `<div class="dfoot">${foot.map(([a, b]) => `<div><small>${a}</small><b>${b}</b></div>`).join('')}</div>` : ''}
+    <div class="acts">${sell}<button class="btn" data-act="closeDeed">إغلاق</button></div></div>`;
 }
 
 /* ---------- البيع والتبادل ---------- */
@@ -490,7 +513,7 @@ function renderModal() {
   } else if (UI.deed !== null) {
     h = deedHTML(UI.deed); blocking = false;
   } else if (UI.pview !== null && G.players[UI.pview]) {
-    h = `<div class="box pview">${holdingsHTML(UI.pview)}<div class="acts"><button class="btn" data-act="closepview">إغلاق</button></div></div>`;
+    h = `<div class="box pview">${holdingsHTML(UI.pview, true)}<div class="acts"><button class="btn" data-act="closepview">إغلاق</button></div></div>`;
   }
   if (blocking) UI.deed = null;
   if (G.over) UI.pview = null;
@@ -500,7 +523,7 @@ function renderModal() {
 }
 
 /* ---------- واجهة وضع 3D: لاعبون، دور، سجل، خريطة مصغّرة ---------- */
-const clockText = () => { const t = Math.floor((Date.now() - UI.t0) / 1000); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
+const clockText = () => { const t = Math.floor(((UI.pAt || Date.now()) - UI.t0) / 1000); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
 const PHASE_TXT = { roll: 'ينتظر الرمي', moving: 'يتحرك', buy: 'يقرر الشراء', auction: 'في مزاد', card: 'يسحب بطاقة', tax: 'يدفع ضريبة', debt: 'عليه دين', end: 'يُنهي دوره', resolving: '...' };
 
 function showBanner() {
@@ -542,8 +565,7 @@ function renderHud() {
   const p = cp(), t = SPACES[p.pos];
   $('#hudturn').innerHTML = G.over
     ? `<div class="turnpill"><span class="tx"><b>انتهت اللعبة</b><small>فاز ${esc(G.winner.name)}</small></span></div>`
-    : `<div class="turnpill"><span id="hudbank" title="البنك">🏦</span><span class="tx"><b>${NET.on && isMyTurn() ? 'دورك' : 'دور ' + esc(p.name)}</b><small>${G.grace ? '⚠️ فرصة أخيرة قبل الطرد' : esc(t.name) + ' · ' + (PHASE_TXT[G.phase] || '')}</small></span>
-        <span class="clk" id="tleft" title="الوقت المتبقي للدور"></span><span class="clk" id="clk" title="مدة اللعبة">${clockText()}</span></div>`;
+    : `<div class="turnpill"><span id="hudbank" title="البنك">🏦</span><span class="tx"><b>${NET.on && isMyTurn() ? 'دورك' : 'دور ' + esc(p.name)}</b><small>${G.grace ? '⚠️ فرصة أخيرة قبل الطرد' : esc(t.name) + ' · ' + (PHASE_TXT[G.phase] || '')}</small></span></div>`;
 
   const log = $('#hudlog');
   log.innerHTML = G.log.slice(0, 40).reverse().map(l => `<div>${esc(l)}</div>`).join('');
@@ -715,6 +737,7 @@ function render() {
   if (G.phase !== 'buy') UI.buyClosed = false;
   renderBoard(); renderPlayers(); renderMine(); renderCenter(); renderLog(); renderModal(); renderStatus();
   if (UI.hud) renderHud();
+  renderPause();
   renderBuyBar();
   coinFx();
   maybeFsPrompt();
@@ -722,8 +745,38 @@ function render() {
   if (window.S3D && S3D.on) S3D.sync();
 }
 
+/* ---------- الإيقاف المؤقت (أونلاين فقط: يتطلب موافقة بقية اللاعبين) ---------- */
+function renderPause() {
+  const box = $('#hudpause'), btn = $('#btnpause');
+  if (!box) return;
+  const me = viewerId(), online = NET.on && !G.over;
+  btn.classList.toggle('hidden', !online);
+  // تجميد ساعة اللعبة أثناء الإيقاف
+  if (G.paused && !UI.pAt) UI.pAt = Date.now();
+  if (!G.paused && UI.pAt) { UI.t0 += Date.now() - UI.pAt; UI.pAt = 0; }
+  document.body.classList.toggle('gpaused', !!G.paused);
+  let h = '';
+  const nm = i => esc(G.players[i].name);
+  if (online && G.paused) {
+    h = `<div class="pz big"><div class="pzi">⏸</div><b>اللعبة متوقفة مؤقتًا</b><small>بطلب ${nm(G.pause ? G.pause.by : me)}</small>
+      <button class="btn" data-act="pauseres">▶ استئناف اللعبة</button></div>`;
+  } else if (online && G.pause) {
+    const by = G.pause.by;
+    if (by === me) h = `<div class="pz"><b>⏸ طلبتَ إيقاف اللعبة</b><small>بانتظار موافقة اللاعبين الآخرين (${G.pause.acks.length})</small><div class="pzb"><button class="btn ghost sm" data-act="pausecancel">إلغاء الطلب</button></div></div>`;
+    else if (!G.pause.acks.includes(me)) h = `<div class="pz ask"><b>⏸ ${nm(by)} يطلب إيقاف اللعبة مؤقتًا</b><small>هل توافق؟</small><div class="pzb"><button class="btn" data-act="pauseyes">موافق</button><button class="btn ghost" data-act="pauseno">رفض</button></div></div>`;
+    else h = `<div class="pz"><b>⏸ ${nm(by)} يطلب إيقاف اللعبة</b><small>وافقتَ — بانتظار البقية</small></div>`;
+  }
+  if (box.innerHTML !== h) box.innerHTML = h;
+  box.classList.toggle('show', h !== '');
+}
+
 /* ---------- الأحداث ---------- */
 const ACTIONS = {
+  pausereq() { if (NET.on && !G.paused && !G.pause) NET.send({ t: 'pause', a: 'request' }); },
+  pauseyes() { NET.send({ t: 'pause', a: 'accept' }); },
+  pauseno() { NET.send({ t: 'pause', a: 'decline' }); },
+  pausecancel() { NET.send({ t: 'pause', a: 'cancel' }); },
+  pauseres() { NET.send({ t: 'pause', a: 'resume' }); },
   count(n) { UI.count = +n; if (UI.pick >= UI.count) UI.pick = null; renderSetup(); },
   pickchar(i) { UI.pick = UI.pick === +i ? null : +i; renderSetup(); },
   setchar(k) { if (UI.pick !== null) UI.chars[UI.pick] = +k; UI.pick = null; renderSetup(); },
@@ -854,7 +907,7 @@ renderSetup();
 setInterval(() => {
   const el = document.getElementById('tleft');
   if (!el || !G.deadline || G.over) return;
-  const left = Math.max(0, (G.deadline - Date.now()) / 1000);
+  const left = Math.max(0, (G.paused ? G.pauseLeft : G.deadline - Date.now()) / 1000);
   el.textContent = '⏱ ' + Math.ceil(left);
   el.classList.toggle('low', left <= 5);
   const f = document.getElementById('tbarfill'); if (f) { f.style.width = (left / ((G.turnMs || 20000) / 1000) * 100) + '%'; f.classList.toggle('low', left <= 5 || !!G.grace); }
