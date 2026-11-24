@@ -205,6 +205,7 @@ function afterAction() {
   if (G.extra && !p.jail) {
     G.phase = 'roll';
     log(`${p.name} رمى زوجًا — يرمي مرة أخرى.`);
+    startTurnTimer();   // الرمية الإضافية تبدأ بمهلة جديدة كاملة
   } else {
     G.phase = 'end';
     // لا عقارات له = لا بناء ولا رهن: ليس لديه ما يفعله، فينتهي دوره تلقائيًا بعد لحظة (ليرى نتيجة حركته)
@@ -222,7 +223,6 @@ function endTurn(force) {
   if (!force && G.phase !== 'end') return;
   let n = G.cur;
   do { n = (n + 1) % G.players.length; } while (G.players[n].bankrupt);
-  cp().played = true;   // أنهى دورته الأولى → يحق له الشراء بعدها
   G.trade = null;       // عرض بيع/تبادل لم يُجَب عليه يسقط بانتهاء الدور
   G.cur = n; G.doubles = 0; G.extra = false; G.phase = 'roll'; G.special = null;
   log(`— دور ${cp().name} —`);
@@ -259,6 +259,10 @@ function turnTimeout(turn) {
   if (G.over || G.cur !== turn) return;
   if (G.rolling || ['moving', 'resolving', 'card', 'auction', 'debt'].includes(G.phase)) {
     turnTimer = setTimeout(() => turnTimeout(turn), 2000); return;
+  }
+  if (G.phase === 'tax') {             // انتهت المهلة والنافذة مفتوحة: تُدفع الضريبة الثابتة بدل أن تسقط
+    log(`⏱ انتهت مهلة ${cp().name} — دُفعت الضريبة الثابتة تلقائيًا.`);
+    payTax('flat'); armTurnTimer(TURN_MS, turnTimeout); return;
   }
   if (!G.acted) {
     G.grace = true;
@@ -326,6 +330,7 @@ async function moveBy(p, n) {
     if (n > 0 && p.pos === 0) {
       p.cash += GO_SALARY;
       log(`${p.name} قبض ${GO_SALARY} ${CUR} عند «انطلق».`);
+      if (!p.played) { p.played = true; log(`🏁 ${p.name} أكمل دورة كاملة — يحق له الشراء الآن.`); }   // الشراء مسموح فقط بعد دورة كاملة
     }
     R();
     await sleep(G.stepMs);
@@ -369,7 +374,7 @@ function land(p) {
     case 'prop': case 'station': case 'util': {
       const o = G.owner[i];
       if (o === null) {
-        if (!p.played) { log(`${p.name}: لا شراء في الدورة الأولى (${s.name}).`); afterAction(); return; }
+        if (!p.played) { log(`${p.name}: لا شراء قبل إكمال دورة كاملة (${s.name}).`); afterAction(); return; }
         G.phase = 'buy'; R(); return;
       }
       if (o === p.id) { afterAction(); return; }

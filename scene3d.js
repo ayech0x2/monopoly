@@ -935,7 +935,7 @@ function buildScenery() {
 
   // إطار خشبي دافئ حول اللوحة + ظل تلامس ناعم — ليفصلها عن العشب
   // إطار خشبي بارز بعروق مرسومة وطلاء لامع، خيط نحاسي على حافته الداخلية وأركان نحاسية
-  const OUT = 13.5, BW = 0.72, FH = 0.27;                     // العرض الخارجي، عرض العارضة، ارتفاع الإطار (أعلى من البلاط بقليل)
+  const OUT = 13.0, BW = 0.4, FH = 0.24;                    // العرض الخارجي، عرض العارضة، ارتفاع الإطار (أعلى من البلاط بقليل)
   const wc = mkCanvas(1024, 128), wg = wc.getContext('2d'), wr = rng(31);
   const wgr = wg.createLinearGradient(0, 0, 0, 128); wgr.addColorStop(0, '#b06f33'); wgr.addColorStop(0.5, '#9c5c26'); wgr.addColorStop(1, '#a9682e');
   wg.fillStyle = wgr; wg.fillRect(0, 0, 1024, 128);
@@ -955,13 +955,13 @@ function buildScenery() {
   const slab = new THREE.Mesh(new THREE.BoxGeometry(OUT - 0.1, 0.1, OUT - 0.1), woodDk);
   slab.position.y = 0.05; slab.receiveShadow = true; scene.add(slab);
   const beamLong = new RoundedBoxGeometry(OUT, FH, BW, 4, 0.07), beamShort = new RoundedBoxGeometry(OUT - BW * 2, FH, BW, 4, 0.07);
-  const inlay = new THREE.BoxGeometry(OUT - BW * 2 + 0.2, 0.012, 0.045), cap = new RoundedBoxGeometry(BW + 0.1, FH + 0.07, BW + 0.1, 4, 0.09);
+  const inlay = new THREE.BoxGeometry(OUT - BW * 2 + 0.2, 0.012, 0.045), cap = new RoundedBoxGeometry(BW + 0.08, FH + 0.05, BW + 0.08, 4, 0.06);
   for (let k = 0; k < 4; k++) {
     const g = new THREE.Group(); g.rotation.y = k * Math.PI / 2;
     const beam = new THREE.Mesh(k % 2 ? beamShort : beamLong, wood);
     beam.position.set(0, FH / 2, OUT / 2 - BW / 2); beam.castShadow = beam.receiveShadow = true;
     const line = new THREE.Mesh(inlay, brass); line.position.set(0, FH + 0.002, OUT / 2 - BW + 0.1);
-    const corner = new THREE.Mesh(cap, brass); corner.position.set(OUT / 2 - BW / 2, (FH + 0.07) / 2, OUT / 2 - BW / 2); corner.castShadow = corner.receiveShadow = true;
+    const corner = new THREE.Mesh(cap, brass); corner.position.set(OUT / 2 - BW / 2, (FH + 0.05) / 2, OUT / 2 - BW / 2); corner.castShadow = corner.receiveShadow = true;
     g.add(beam, line, corner); scene.add(g);
   }
   const sc = mkCanvas(256, 256), sg = sc.getContext('2d'), gr = sg.createRadialGradient(128, 128, 70, 128, 128, 128);

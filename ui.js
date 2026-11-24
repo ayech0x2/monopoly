@@ -313,7 +313,45 @@ function deedHTML(i) {
 
 /* ---------- البيع والتبادل ---------- */
 const propChip = i => `<span class="tprop"><i style="background:${SPACES[i].group ? GROUPS[SPACES[i].group].color : '#888'}"></i>${esc(SPACES[i].name)}${G.mortgaged[i] ? ' <small>(مرهون)</small>' : ''}</span>`;
-// نافذة إعداد العرض: لمن، وماذا تطلب في المقابل
+// ---- نافذة البيع / التبادل: عمودان «تعطي» و«تحصل على»، بطاقات عقارات، ملخّص حيّ وتحقّق فوري ----
+const tGroupColor = i => (SPACES[i].group ? GROUPS[SPACES[i].group].color : '#8a9a95');
+const tValue = i => (G.mortgaged[i] ? SPACES[i].price / 2 : SPACES[i].price);
+function tcard(i, o = {}) {
+  const tag = o.act ? 'button' : 'div';
+  return `<${tag} class="tcard${o.on ? ' on' : ''}${G.mortgaged[i] ? ' mort' : ''}"${o.act ? ` type="button" data-act="${o.act}" data-arg="${i}"` : ''}>
+    <span class="tcb" style="background:${tGroupColor(i)}"></span><b>${esc(SPACES[i].name)}</b>
+    <small>${SPACES[i].price} ${CUR}${G.mortgaged[i] ? ' · مرهون' : ''}</small>${o.on ? '<em>✓</em>' : ''}</${tag}>`;
+}
+const tcash = n => `<div class="tcashv"><b class="coin"></b><span>${n} ${CUR}</span></div>`;
+const tplayer = p => `<span class="tpl" style="--pc:${p.color}"><span class="pav">${p.icon}</span><b>${esc(p.name)}</b></span>`;
+function tmoney(id, label, val, max) {
+  return `<div class="tmoney"><label for="${id}">${label}</label>
+    <div class="tmrow"><input id="${id}" type="number" inputmode="numeric" min="0" max="${max}" placeholder="0" value="${esc(val)}"><span class="cur">${CUR}</span></div>
+    <div class="tq">${[50, 100, 200].map(n => `<button type="button" class="qchip" data-act="tradeq" data-arg="${id}:${n}">+${n}</button>`).join('')}<button type="button" class="qchip" data-act="tradeq" data-arg="${id}:0">صفر</button></div></div>`;
+}
+function tradeCalc() {
+  const d = UI.trade, me = cp();
+  const ask = Math.max(0, Math.floor(+d.ask || 0)), add = Math.max(0, Math.floor(+d.add || 0));
+  const t = { from: me.id, to: d.to, give: d.give, take: d.take, cash: ask - add };
+  const err = d.to === null ? 'اختر اللاعب' : tradeErr(t);
+  return { ask, add, t, err, giveV: tValue(d.give) + add, getV: (d.take !== null ? tValue(d.take) : 0) + ask };
+}
+// يحدّث الملخّص وزر الإرسال دون إعادة رسم النافذة (حتى لا يضيع التركيز أثناء الكتابة)
+function tradePatch() {
+  if (!UI.trade || !$('#tradeSum')) return;
+  const c = tradeCalc(), d = UI.trade;
+  const giveTxt = [propName(d.give), c.add ? `${c.add} ${CUR}` : ''].filter(Boolean).join(' + ');
+  const getTxt = [d.take !== null ? propName(d.take) : '', c.ask ? `${c.ask} ${CUR}` : ''].filter(Boolean).join(' + ') || '—';
+  $('#tradeSum').innerHTML = `تعطي <b>${giveTxt}</b> وتحصل على <b>${getTxt}</b>`;
+  $('#tvGive').textContent = `${c.giveV} ${CUR}`; $('#tvGet').textContent = `${c.getV} ${CUR}`;
+  const fair = $('#tradeFair');
+  fair.className = 'tfair ' + (c.getV > c.giveV ? 'up' : c.getV < c.giveV ? 'down' : 'eq');
+  fair.textContent = c.err ? '' : c.getV > c.giveV ? 'العرض في صالحك' : c.getV < c.giveV ? 'العرض في صالح الطرف الآخر' : 'عرض متوازن';
+  $('#tradeErr').textContent = c.err && !(c.err === 'اختر اللاعب') ? c.err : (d.err || '');
+  const s = document.querySelector('[data-act="tradesend"]'); if (s) s.disabled = !!c.err;
+}
+const propName = i => esc(SPACES[i].name);
+
 function tradeHTML() {
   const d = UI.trade, me = cp();
   const others = G.players.filter(p => !p.bankrupt && p.id !== me.id);
@@ -321,29 +359,39 @@ function tradeHTML() {
   const to = d.to === null ? null : G.players[d.to];
   const theirs = to ? SPACES.map((s, i) => i).filter(i => G.owner[i] === to.id && !tradableErr(i, to.id)) : [];
   if (!theirs.includes(d.take)) d.take = null;
+  const picker = others.map(p => `<button type="button" class="pbtn${p.id === d.to ? ' on' : ''}" style="--pc:${p.color}" data-act="tradeto" data-arg="${p.id}">
+      <span class="pav">${p.icon}</span><b>${esc(p.name)}</b><small>${p.cash} ${CUR}</small></button>`).join('') || '<p>لا يوجد لاعبون آخرون</p>';
   return `<div class="box trade">${ribbon('بيع / تبادل')}
-    <p>تعرض: ${propChip(d.give)}</p>
-    <h4>على من؟</h4>
-    <div class="acts">${others.map(p => `<button class="btn sm ${p.id === d.to ? '' : 'ghost'}" data-act="tradeto" data-arg="${p.id}">${p.icon} ${esc(p.name)} <small>(${p.cash} ${CUR})</small></button>`).join('') || 'لا يوجد لاعبون آخرون'}</div>
-    <h4>ماذا تطلب في المقابل؟</h4>
-    <label class="trow">مال يدفعه لك <input id="tradeAsk" type="number" min="0" max="${to ? to.cash : 0}" placeholder="0" value="${esc(d.ask)}"></label>
-    ${theirs.length ? `<div class="tlabel">أو/و عقار من عقاراته (اختياري):</div><div class="acts">${theirs.map(i => `<button class="btn sm ${i === d.take ? '' : 'ghost'}" data-act="tradetake" data-arg="${i}">${propChip(i)}</button>`).join('')}</div>` : ''}
-    <label class="trow">مال تضيفه أنت <input id="tradeAdd" type="number" min="0" max="${me.cash}" placeholder="0" value="${esc(d.add)}"></label>
-    <p class="warn terr">${esc(d.err || '')}</p>
-    <div class="acts">${btn('أرسل العرض', 'tradesend', undefined, 'green', !to)}${btn('إلغاء', 'tradeclose', undefined, 'ghost')}</div></div>`;
+    <div class="tstep">١ · مع من تتبادل؟</div><div class="tpicker">${picker}</div>
+    <div class="tcols">
+      <section class="tcol give"><h4>⬆ تعطي</h4>
+        ${tcard(d.give)}
+        ${tmoney('tradeAdd', 'أضف مالًا من عندك (اختياري)', d.add, me.cash)}
+        <div class="tval">القيمة: <b id="tvGive"></b></div></section>
+      <section class="tcol get"><h4>⬇ تحصل على${to ? ' من ' + esc(to.name) : ''}</h4>
+        ${tmoney('tradeAsk', 'مال يدفعه لك', d.ask, to ? to.cash : 0)}
+        <div class="tlabel">عقار من عقاراته (اختياري):</div>
+        <div class="tgrid">${theirs.length ? theirs.map(i => tcard(i, { act: 'tradetake', on: i === d.take })).join('') : '<p class="tnone">لا عقارات قابلة للتبادل</p>'}</div>
+        <div class="tval">القيمة: <b id="tvGet"></b></div></section>
+    </div>
+    <div id="tradeSum" class="tsum"></div><div id="tradeFair" class="tfair"></div>
+    <p id="tradeErr" class="terr"></p>
+    <div class="acts">${btn('أرسل العرض', 'tradesend', undefined, 'green', true)}${btn('إلغاء', 'tradeclose', undefined, 'ghost')}</div></div>`;
 }
 // العرض المعلّق: يراه الجميع، ويردّ عليه من وُجِّه إليه (محليًا: من يجلس أمام الجهاز)
 function tradeOfferHTML() {
   const t = G.trade, a = G.players[t.from], b = G.players[t.to];
   const local = UI.viewer === null, mineToAnswer = local || UI.viewer === t.to, mineToCancel = !local && UI.viewer === t.from;
-  const wants = [t.take !== null ? propChip(t.take) : '', t.cash > 0 ? `<b>${t.cash} ${CUR}</b>` : ''].filter(Boolean).join(' و ');
-  const extra = t.cash < 0 ? `<p>ويضيف ${esc(a.name)} من عنده: <b>${-t.cash} ${CUR}</b></p>` : '';
-  return `<div class="box trade">${ribbon('عرض بيع / تبادل')}
-    <p><b style="color:${a.color}">${a.icon} ${esc(a.name)}</b> يعرض على <b style="color:${b.color}">${b.icon} ${esc(b.name)}</b>:</p>
-    <p>يعطيه: ${propChip(t.give)}</p>
-    ${wants ? `<p>مقابل: ${wants}</p>` : ''}${extra}
-    ${mineToAnswer ? `<div class="acts">${btn('أقبل', 'tradeyes', undefined, 'green')}${btn('أرفض', 'tradeno', undefined, 'red')}</div>`
-      : `<p>⏳ بانتظار ردّ ${esc(b.name)}...</p>${mineToCancel ? `<div class="acts">${btn('اسحب العرض', 'tradecancel', undefined, 'ghost')}</div>` : ''}`}</div>`;
+  const aGives = tcard(t.give) + (t.cash < 0 ? tcash(-t.cash) : '');
+  const bGives = (t.take !== null ? tcard(t.take) : '') + (t.cash > 0 ? tcash(t.cash) : '') || '<p class="tnone">لا شيء</p>';
+  return `<div class="box trade offer">${ribbon('عرض بيع / تبادل')}
+    <div class="toffer-h">${tplayer(a)}<span class="tarrow">⇄</span>${tplayer(b)}</div>
+    <div class="tcols">
+      <section class="tcol"><h4>${esc(a.name)} يعطي</h4>${aGives}</section>
+      <section class="tcol"><h4>${esc(b.name)} يعطي</h4>${bGives}</section>
+    </div>
+    ${mineToAnswer ? `<p class="tq2">هل تقبل هذا العرض يا ${esc(b.name)}؟</p><div class="acts">${btn('✓ أقبل', 'tradeyes', undefined, 'green')}${btn('✕ أرفض', 'tradeno', undefined, 'red')}</div>`
+      : `<p class="tq2">⏳ بانتظار ردّ ${esc(b.name)}...</p>${mineToCancel ? `<div class="acts">${btn('اسحب العرض', 'tradecancel', undefined, 'ghost')}</div>` : ''}`}</div>`;
 }
 
 function manageHTML() {
@@ -448,6 +496,7 @@ function renderModal() {
   if (G.over) UI.pview = null;
   m.innerHTML = h;
   m.classList.toggle('hidden', !h);
+  tradePatch();
 }
 
 /* ---------- واجهة وضع 3D: لاعبون، دور، سجل، خريطة مصغّرة ---------- */
@@ -587,12 +636,11 @@ function rollCash(now) {
 }
 /* شريط المعاملات تحت لوحة الدور: مَن دفع لمَن وكم */
 function txFeed(flows) {
-  const hud = $('#hud'), pill = $('#hudturn');
+  const hud = $('#hud');
   if (!hud || !flows.length) return;
   let box = $('#txfeed');
   if (!box) { box = document.createElement('div'); box.id = 'txfeed'; hud.appendChild(box); }
-  const r = pill.getBoundingClientRect(), h = hud.getBoundingClientRect();
-  box.style.top = `${r.bottom - h.top + 10}px`;
+  box.style.top = '124px';   // تحت صف اللاعبين (اللوحة الموحّدة صارت أسفل اليمين)
   const who = w => (w === 'bank' ? '<span class="who bank">🏦 البنك</span>' : `<span class="who" style="--pc:${G.players[w].color}">${G.players[w].icon} ${esc(G.players[w].name)}</span>`);
   flows.forEach(([from, to, amt]) => {
     const row = document.createElement('div');
@@ -712,13 +760,21 @@ const ACTIONS = {
   tradetake(i) { if (UI.trade) { UI.trade.take = UI.trade.take === +i ? null : +i; UI.trade.err = ''; render(); } },
   tradesend() {
     const d = UI.trade; if (!d || d.to === null) return;
-    const ask = Math.max(0, Math.floor(+d.ask || 0)), add = Math.max(0, Math.floor(+d.add || 0));
-    const t = { from: G.cur, to: d.to, give: d.give, take: d.take, cash: ask - add };
-    d.err = tradeErr(t) || '';
-    if (d.err) { render(); return; }
+    const c = tradeCalc();
+    d.err = c.err || '';
+    if (c.err) { render(); return; }
     UI.trade = null;
-    dispatch('trade', { to: t.to, give: t.give, take: t.take, cash: t.cash });
+    dispatch('trade', { to: c.t.to, give: c.t.give, take: c.t.take, cash: c.t.cash });
     render();
+  },
+  // أزرار المبالغ السريعة: +50 / +100 / +200 تُضاف إلى الحقل، «صفر» تفرّغه
+  tradeq(arg) {
+    const d = UI.trade; if (!d) return;
+    const [id, n] = arg.split(':'), key = id === 'tradeAsk' ? 'ask' : 'add';
+    const inp = $('#' + id), max = inp ? +inp.max : Infinity;
+    d[key] = +n === 0 ? '' : String(Math.min(max, (Math.floor(+d[key]) || 0) + +n));
+    if (inp) inp.value = d[key];
+    d.err = ''; tradePatch();
   },
   tradeyes() { dispatch('tradeyes'); },
   tradeno() { dispatch('tradeno'); },
@@ -754,6 +810,7 @@ document.addEventListener('input', e => {
   if (!UI.trade) return;
   if (e.target.id === 'tradeAsk') UI.trade.ask = e.target.value;
   if (e.target.id === 'tradeAdd') UI.trade.add = e.target.value;
+  UI.trade.err = ''; tradePatch();
 });
 document.addEventListener('click', e => {
   const t = e.target.closest('[data-act]');
