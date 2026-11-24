@@ -566,9 +566,11 @@ body.light {
   --w: 132px; --h: 184px;
   position: absolute; left: calc(var(--w) / -2); bottom: calc(var(--h) * -0.3);
   width: var(--w); height: var(--h); z-index: var(--z); pointer-events: auto; cursor: pointer;
-  transform: translateX(var(--x, 0));
+  transform: translate(var(--x, 0), var(--dy, 0)); touch-action: none;
 }
 .hcard:hover { z-index: 100; }
+.hcard.drag { z-index: 200 !important; cursor: grabbing; }
+.hcard.drag .hin { transform: scale(1.15) rotate(-3deg) !important; box-shadow: 0 0 0 3px #f2b134, 0 18px 34px rgba(0,0,0,.55); transition: none; }
 .hin {
   position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; user-select: none;
   direction: rtl; color: #2a2418; font-size: 10px; line-height: 1.4;

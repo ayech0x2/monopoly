@@ -33,7 +33,7 @@ function newGame(configs) {
     houseBank: 32, hotelBank: 12,
     decks: { chance: shuffle(CHANCE.map((_, i) => i)), chest: shuffle(CHEST.map((_, i) => i)) },
     log: [], debt: null, auction: null, card: null, special: null, trade: null,
-    over: false, winner: null, deadline: 0, turnMs: 20000, acted: false, grace: false,
+    over: false, winner: null, deadline: 0, turnMs: 60000, acted: false, grace: false,
   });
   log(`بدأت اللعبة! الدور الأول: ${cp().name}`);
   startTurnTimer();
@@ -232,14 +232,15 @@ function endTurn(force) {
 }
 
 /* ---------- مهلة الدور ----------
-   20 ثانية لكل دور. إن لم يلعب اللاعب أي فعل خلالها تُفتح له مهلة أخيرة مدتها دقيقة؛ فإن انتهت دون لعب يُطرد.
+   دقيقة لكل دور. إن لم يلعب اللاعب أي فعل خلالها تُفتح له مهلة أخيرة مدتها دقيقة؛ فإن انتهت دون لعب يُطرد.
    وإن كان قد لعب (رمى مثلًا) ولم يُنهِ دوره، ينتهي دوره تلقائيًا عند انتهاء المهلة. */
-const TURN_MS = 20000, GRACE_MS = 60000;
+const TURN_MS = 60000, GRACE_MS = 60000;
 let turnTimer = null, turnFn = null, pausedLeft = 0;
 function armTurnTimer(ms, fn) {
   clearTimeout(turnTimer); turnFn = fn;
   G.deadline = Date.now() + ms; G.turnMs = ms;
   const turn = G.cur;
+  if (G.paused) { pausedLeft = ms; G.pauseLeft = ms; return; }   // الإيقاف قائم: لا يبدأ العدّاد قبل الاستئناف
   turnTimer = setTimeout(() => fn(turn), ms);
 }
 function startTurnTimer() {
@@ -272,6 +273,7 @@ function playerActed() {
 }
 function turnTimeout(turn) {
   if (G.over || G.cur !== turn) return;
+  if (G.paused) return;
   if (G.rolling || ['moving', 'resolving', 'card', 'auction', 'debt'].includes(G.phase)) {
     turnTimer = setTimeout(() => turnTimeout(turn), 2000); return;
   }
@@ -343,8 +345,9 @@ async function moveBy(p, n) {
   for (let k = 0; k < steps; k++) {
     p.pos = (p.pos + dir) % 40;
     if (n > 0 && p.pos === 0) {
-      p.cash += GO_SALARY;
-      log(`${p.name} قبض ${GO_SALARY} ${CUR} عند «انطلق».`);
+      const land = k === steps - 1, amt = land ? GO_SALARY * 2 : GO_SALARY;   // الوقوف تمامًا على «انطلق» = ضعف الراتب
+      p.cash += amt;
+      log(`${p.name} ${land ? 'وقف على «انطلق» وقبض ضعف الراتب' : 'قبض'} ${amt} ${CUR}${land ? '' : ' عند «انطلق»'}.`);
       if (!p.played) { p.played = true; log(`🏁 ${p.name} أكمل دورة كاملة — يحق له الشراء الآن.`); }   // الشراء مسموح فقط بعد دورة كاملة
     }
     R();
@@ -431,7 +434,7 @@ function passBuy() {
 function payTax(choice) {
   if (G.phase !== 'tax') return;
   const p = cp();
-  const amt = choice === 'pct' ? Math.floor(totalWorth(p) * 0.1) : 200;
+  const amt = 200;
   G.phase = 'resolving';
   log(`${p.name} يدفع ضريبة الدخل: ${amt} ${CUR}.`);
   pay(p, amt, null, afterAction);
@@ -605,6 +608,7 @@ function canBuild(i, pid) {
   const s = SPACES[i];
   if (s.type !== 'prop' || G.owner[i] !== pid) return 'غير متاح';
   if (!hasMonopoly(s.group, pid)) return 'تحتاج كامل المجموعة';
+  if (SPACES[G.players[pid].pos].group !== s.group) return 'يجب أن تقف على لون هذا العقار';
   const gi = groupIdx(s.group);
   if (gi.some(j => G.mortgaged[j])) return 'في المجموعة عقار مرهون';
   const h = G.houses[i];

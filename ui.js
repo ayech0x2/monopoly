@@ -502,8 +502,8 @@ function renderModal() {
     h = `<div class="box card-modal ${k}">${ribbon(k === 'chance' ? 'حظ' : 'صندوق الجماعة')}<div class="kind">${k === 'chance' ? '❓' : '🎁'}</div>
       <div class="txt">${esc(G.card.card.text)}</div><div class="acts">${isMyTurn() ? btn('حسنًا', 'cardok') : ''}</div></div>`;
   } else if (G.phase === 'tax' && isMyTurn()) {
-    h = `<div class="box card-modal">${ribbon('ضريبة الدخل')}<div class="kind">💸</div><div class="txt">اختر قبل أن تحسب ثروتك:</div>
-      <div class="acts">${btn('ادفع 200 ' + CUR, 'taxflat')}${btn('ادفع 10% من ثروتي', 'taxpct', undefined, 'ghost')}</div></div>`;
+    h = `<div class="box card-modal">${ribbon('ضريبة الدخل')}<div class="kind">💸</div><div class="txt">ستدفع ضريبة ثابتة:</div>
+      <div class="acts">${btn('ادفع 200 ' + CUR, 'taxflat')}</div></div>`;
   } else if (G.phase === 'auction' && G.auction) {
     h = auctionHTML();
   } else if (G.phase === 'buy' && isMyTurn() && !UI.buyClosed && !UI.manage && !UI.hud) {
@@ -541,7 +541,7 @@ const IC = {
   off: svg('<path d="M2 8c5-5 15-5 20 0M5 12c4-3.5 10-3.5 14 0M9 16c2-1.5 4-1.5 6 0M3 3l18 18"/>'),
 };
 function renderHud() {
-  const tl = Math.max(0, Math.min((G.turnMs || 20000) / 1000, (G.deadline - Date.now()) / 1000));   // يُرسم الشريط بعرضه الصحيح فورًا (لا يعود إلى 100% عند كل تحديث)
+  const tl = Math.max(0, Math.min((G.turnMs || 60000) / 1000, (G.deadline - Date.now()) / 1000));   // يُرسم الشريط بعرضه الصحيح فورًا (لا يعود إلى 100% عند كل تحديث)
   $('#hudplayers').innerHTML = G.players.map(p => {
     const n = SPACES.reduce((k, s, i) => k + (G.owner[i] === p.id ? 1 : 0), 0);
     const bld = SPACES.reduce((k, s, i) => k + (G.owner[i] === p.id ? G.houses[i] : 0), 0);
@@ -557,7 +557,7 @@ function renderHud() {
       <span class="body">
         <span class="rib"><b>${esc(p.name)}</b>${me ? '<small>أنت</small>' : ''}</span>
         <span class="plate">${p.bankrupt ? '<span class="bk">أفلس</span>' : `<span class="st" title="عقارات">${IC.land}<b>${n}</b></span><span class="st" title="مبانٍ">${IC.house}<b>${bld}</b></span>${flags}`}</span>
-        ${now ? `<span class="tbar"><i id="tbarfill" class="${tl <= 5 || G.grace ? 'low' : ''}" style="width:${(tl / (G.turnMs || 20000) * 1000 * 100).toFixed(1)}%"></i></span>` : ''}
+        ${now ? `<span class="tbar"><i id="tbarfill" class="${tl <= 5 || G.grace ? 'low' : ''}" style="width:${(tl / (G.turnMs || 60000) * 1000 * 100).toFixed(1)}%"></i></span>` : ''}
       </span>
       ${canSkip(p) ? `<div class="skiprow"><button class="btn sm red" data-act="skip" data-arg="${p.id}">⏭ إخراج ${esc(p.name)} (منقطع)</button></div>` : ''}</div>`;
   }).join('');
@@ -698,12 +698,48 @@ function handCardHTML(i) {
     ${G.mortgaged[i] ? '<div class="stamp">مرهون</div>' : ''}</div></div>`;
 }
 
+const handOrder = () => { try { return JSON.parse(localStorage.getItem('aqHand') || '[]'); } catch { return []; } };
+/* سحب وإفلات: اسحب بطاقة وضعها في أي موضع لترتيب أوراقك (تُحفظ الترتيبات) */
+(function handDrag() {
+  let d = null;
+  document.addEventListener('pointerdown', e => {
+    const c = e.target.closest('#hudhand .hcard'); if (!c || e.button) return;
+    d = { c, x0: e.clientX, y0: e.clientY, on: false, i: +c.dataset.arg, k: UI.handMine.indexOf(+c.dataset.arg), base: parseFloat(c.style.getPropertyValue('--x')) || 0 };
+  });
+  document.addEventListener('pointermove', e => {
+    if (!d) return;
+    const dx = e.clientX - d.x0, dy = e.clientY - d.y0;
+    if (!d.on && Math.hypot(dx, dy) < 8) return;
+    if (!d.on) { d.on = true; UI.dragCard = d.i; d.c.classList.add('drag'); }
+    d.c.style.setProperty('--x', (d.base + dx) + 'px');
+    d.c.style.setProperty('--dy', dy + 'px');
+  });
+  const end = e => {
+    if (!d) return;
+    const w = d; d = null;
+    if (!w.on) return;
+    const sp = UI.handSp, n = UI.handMine.length;
+    if (sp > 0) {
+      let k = Math.round((n - 1) / 2 - (w.base + e.clientX - w.x0) / sp);
+      k = Math.max(0, Math.min(n - 1, k));
+      const arr = UI.handMine.filter(i => i !== w.i); arr.splice(k, 0, w.i);
+      try { localStorage.setItem('aqHand', JSON.stringify(arr)); } catch {}
+    }
+    UI.dragCard = null; UI.noClick = Date.now();
+    const el = $('#hudhand'); el.dataset.h = ''; renderHand();
+  };
+  document.addEventListener('pointerup', end); document.addEventListener('pointercancel', end);
+})();
+
 function renderHand() {
   const el = $('#hudhand'), pid = viewerId();
   const order = [...Object.keys(GROUPS).flatMap(g => groupIdx(g)),
     ...SPACES.map((s, i) => i).filter(i => SPACES[i].type === 'station'),
     ...SPACES.map((s, i) => i).filter(i => SPACES[i].type === 'util')];
-  const mine = order.filter(i => G.owner[i] === pid);
+  let mine = order.filter(i => G.owner[i] === pid);
+  const ho = handOrder();
+  mine = mine.map((i, d) => [i, ho.indexOf(i) < 0 ? 1e6 + d : ho.indexOf(i)]).sort((a, b) => a[1] - b[1]).map(a => a[0]);
+  UI.handMine = mine;
   const n = mine.length;
   $('#hud').classList.toggle('hashand', n > 0);
   // صف أفقي مستقيم: تتقلّص المسافة (تتداخل البطاقات) كلما زاد العدد حتى يتسع الصف للشاشة
@@ -712,6 +748,8 @@ function renderHand() {
     const x = (k - (n - 1) / 2) * -sp; // RTL: أول بطاقة على اليمين
     return handCardHTML(i).replace('style="', `style="--x:${x.toFixed(1)}px;--z:${k};`);
   }).join('') + (n ? `<div class="hcount">عقاراتي · ${n}</div>` : '');
+  UI.handSp = sp;
+  if (UI.dragCard) return;
   if (el.dataset.h !== html) { el.innerHTML = html; el.dataset.h = html; }
 }
 
@@ -866,6 +904,7 @@ document.addEventListener('input', e => {
   UI.trade.err = ''; tradePatch();
 });
 document.addEventListener('click', e => {
+  if (UI.noClick && Date.now() - UI.noClick < 300) return;
   const t = e.target.closest('[data-act]');
   if (!t || t.disabled) return;
   const f = ACTIONS[t.dataset.act];
@@ -910,7 +949,7 @@ setInterval(() => {
   const left = Math.max(0, (G.paused ? G.pauseLeft : G.deadline - Date.now()) / 1000);
   el.textContent = '⏱ ' + Math.ceil(left);
   el.classList.toggle('low', left <= 5);
-  const f = document.getElementById('tbarfill'); if (f) { f.style.width = (left / ((G.turnMs || 20000) / 1000) * 100) + '%'; f.classList.toggle('low', left <= 5 || !!G.grace); }
+  const f = document.getElementById('tbarfill'); if (f) { f.style.width = (left / ((G.turnMs || 60000) / 1000) * 100) + '%'; f.classList.toggle('low', left <= 5 || !!G.grace); }
 }, 250);
 
 /* إبراز بيدق اللاعب عند التمرير على بطاقته */

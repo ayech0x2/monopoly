@@ -214,8 +214,8 @@ let tc = null;
 const _v = new THREE.Vector3();
 function wantedTableCard() {
   if (!G.players || G.over) return null;
-  if (typeof viewerId === 'function' && viewerId() !== G.cur) return null;   // البطاقة تظهر لصاحب الدور فقط
-  if (G.phase === 'card' && G.card) return { key: `c${G.card.kind}${G.card.idx}`, kind: G.card.kind, text: G.card.card.text };
+  if (G.phase === 'card' && G.card) return { key: `c${G.card.kind}${G.card.idx}`, kind: G.card.kind, text: G.card.card.text };   // بطاقة الحظ/الصندوق تظهر للجميع
+  if (typeof viewerId === 'function' && viewerId() !== G.cur) return null;   // صكّ الشراء لصاحب الدور فقط
   if (G.phase === 'buy') { const i = G.players[G.cur].pos; return { key: `d${i}`, deed: i }; }
   return null;
 }
