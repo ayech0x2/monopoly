@@ -68,6 +68,13 @@ function renderLobby(m) {
 }
 
 function onState(m) {
+  // سكربت المشهد ثلاثي الأبعاد وحدة مؤجّلة؛ عند إعادة الاتصال بعد تحديث الصفحة قد تصل الحالة قبل جاهزيته فتُبنى اللوحة المسطّحة بالخطأ
+  if (!window.S3D && !NET.built && !(NET.wait3d > 40)) {
+    NET.wait3d = (NET.wait3d || 0) + 1; NET.pending = m;
+    if (!NET.waiting) { NET.waiting = true; const t = setInterval(() => { if (window.S3D || NET.wait3d > 40) { clearInterval(t); NET.waiting = false; const p = NET.pending; NET.pending = null; onState(p); } else NET.wait3d++; }, 100); }
+    return;
+  }
+  if (NET.pending) { NET.pending = null; }
   const prev = { cur: G.cur, phase: NET.lastPhase };
   Object.assign(G, JSON.parse(m.g));
   NET.on = true; NET.you = m.you; NET.lastPhase = G.phase;
